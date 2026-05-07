@@ -205,9 +205,8 @@ export async function analyzeCertificate({
 
   const userText = buildUserPrompt({ qualificationName, qualificationDescription });
 
-  // Gemma erwartet `type: "image"` mit dem Data-URL als String. Andere
-  // Modelle (z.B. Qwen2.5-VL) nutzen `type: "image_url"`. Bild MUSS vor
-  // dem Text stehen, sonst rendert das Chat-Template keinen Platzhalter.
+  // vLLM OpenAI-Endpoint erwartet `type: "image_url"` mit `image_url.url`
+  // als Data-URL. Bild MUSS vor dem Text stehen.
   const body = {
     model,
     max_tokens: RESPONSE_MAX_TOKENS,
@@ -217,7 +216,7 @@ export async function analyzeCertificate({
       {
         role: 'user',
         content: [
-          { type: 'image', image: dataUrl },
+          { type: 'image_url', image_url: { url: dataUrl } },
           { type: 'text', text: userText },
         ],
       },
