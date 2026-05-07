@@ -134,6 +134,7 @@ export default function DoctorQualificationEditor({ doctorId, selectedQualIds = 
                                     doctorId={doctorId}
                                     qualificationId={qual.id}
                                     qualificationName={qual.name}
+                                    qualificationDescription={qual.description}
                                     doctorQualificationId={dqEntry?.id || null}
                                 />
                             );
@@ -221,6 +222,7 @@ export default function DoctorQualificationEditor({ doctorId, selectedQualIds = 
                                             doctorId={doctorId}
                                             qualificationId={qual.id}
                                             qualificationName={qual.name}
+                                            qualificationDescription={qual.description}
                                             doctorQualificationId={dqEntry?.id || null}
                                         />
                                     );

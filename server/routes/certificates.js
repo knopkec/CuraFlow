@@ -20,6 +20,7 @@ import crypto from 'crypto';
 import { db } from '../index.js';
 import { authMiddleware } from './auth.js';
 import { parseDbToken } from '../utils/crypto.js';
+import { analyzeCertificate, isAnalyzerConfigured } from '../utils/certificateAnalyzer.js';
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -77,6 +78,86 @@ function normalizeDateInput(value) {
   return trimmed;
 }
 
+/**
+ * Führt die LLM-Analyse asynchron im Hintergrund aus und schreibt das
+ * Ergebnis in die Tabelle. Fehler werden geloggt, brechen den Upload-Flow
+ * aber nicht ab (der Upload selbst war ja bereits erfolgreich).
+ */
+async function runAnalysisAndPersist({
+  certificateId,
+  tenantKey,
+  buffer,
+  mimeType,
+  qualificationName,
+  qualificationDescription,
+  fillDatesIfMissing,
+}) {
+  try {
+    const result = await analyzeCertificate({
+      buffer,
+      mimeType,
+      qualificationName,
+      qualificationDescription,
+    });
+
+    const fields = [
+      'analysis_status = ?',
+      'analysis_is_certificate = ?',
+      'analysis_scope_match = ?',
+      'analysis_scope_detected = ?',
+      'analysis_confidence = ?',
+      'analysis_reasoning = ?',
+      'analysis_detected_granted = ?',
+      'analysis_detected_expiry = ?',
+      'analyzed_at = NOW()',
+    ];
+    const params = [
+      result.status,
+      result.is_certificate === null ? null : (result.is_certificate ? 1 : 0),
+      result.scope_match === null ? null : (result.scope_match ? 1 : 0),
+      result.scope_detected,
+      result.confidence,
+      result.reasoning || result.error,
+      result.granted_date,
+      result.expiry_date,
+    ];
+
+    if (fillDatesIfMissing) {
+      if (result.granted_date) {
+        fields.push('granted_date = COALESCE(granted_date, ?)');
+        params.push(result.granted_date);
+      }
+      if (result.expiry_date) {
+        fields.push('expiry_date = COALESCE(expiry_date, ?)');
+        params.push(result.expiry_date);
+      }
+    }
+
+    params.push(certificateId, tenantKey);
+
+    await db.execute(
+      `UPDATE QualificationCertificate
+          SET ${fields.join(', ')}
+        WHERE id = ? AND tenant_key = ?`,
+      params
+    );
+  } catch (err) {
+    console.error('[certificates] LLM-Analyse fehlgeschlagen', err);
+    try {
+      await db.execute(
+        `UPDATE QualificationCertificate
+            SET analysis_status = 'error',
+                analysis_reasoning = ?,
+                analyzed_at = NOW()
+          WHERE id = ? AND tenant_key = ?`,
+        [err.message?.slice(0, 1000) || 'Unbekannter Fehler', certificateId, tenantKey]
+      );
+    } catch (innerErr) {
+      console.error('[certificates] Konnte Fehler-Status nicht persistieren', innerErr);
+    }
+  }
+}
+
 // ============ POST /api/certificates/upload ============
 // multipart/form-data: file + doctor_id, qualification_id, granted_date?, expiry_date?, notes?, doctor_qualification_id?
 router.post('/upload', upload.single('file'), async (req, res, next) => {
@@ -92,6 +173,8 @@ router.post('/upload', upload.single('file'), async (req, res, next) => {
       granted_date,
       expiry_date,
       notes,
+      qualification_name,
+      qualification_description,
     } = req.body || {};
 
     if (!doctor_id || !qualification_id) {
@@ -103,12 +186,13 @@ router.post('/upload', upload.single('file'), async (req, res, next) => {
     ensureCanAccessDoctor(req, doctor_id);
 
     const id = crypto.randomUUID();
+    const initialStatus = isAnalyzerConfigured() ? 'pending' : 'skipped';
     await db.execute(
       `INSERT INTO QualificationCertificate
          (id, tenant_key, doctor_id, qualification_id, doctor_qualification_id,
           file_name, mime_type, file_size, file_data,
-          granted_date, expiry_date, notes, uploaded_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          granted_date, expiry_date, notes, uploaded_by, analysis_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         tenantKey,
@@ -123,8 +207,23 @@ router.post('/upload', upload.single('file'), async (req, res, next) => {
         normalizeDateInput(expiry_date),
         notes ? String(notes).slice(0, 500) : null,
         req.user?.sub || null,
+        initialStatus,
       ]
     );
+
+    // Analyse asynchron im Hintergrund (Upload-Antwort wird nicht blockiert).
+    if (isAnalyzerConfigured() && qualification_name) {
+      const fillDatesIfMissing = !normalizeDateInput(granted_date) || !normalizeDateInput(expiry_date);
+      runAnalysisAndPersist({
+        certificateId: id,
+        tenantKey,
+        buffer: req.file.buffer,
+        mimeType: req.file.mimetype,
+        qualificationName: qualification_name,
+        qualificationDescription: qualification_description,
+        fillDatesIfMissing,
+      });
+    }
 
     res.json({
       id,
@@ -139,6 +238,7 @@ router.post('/upload', upload.single('file'), async (req, res, next) => {
       notes: notes || null,
       uploaded_by: req.user?.sub || null,
       uploaded_at: new Date().toISOString(),
+      analysis_status: initialStatus,
     });
   } catch (err) {
     next(err);
@@ -174,7 +274,10 @@ router.get('/', async (req, res, next) => {
       `SELECT id, doctor_id, qualification_id, doctor_qualification_id,
               file_name, mime_type, file_size,
               granted_date, expiry_date, notes,
-              uploaded_by, uploaded_at, updated_at
+              uploaded_by, uploaded_at, updated_at,
+              analysis_status, analysis_is_certificate, analysis_scope_match,
+              analysis_scope_detected, analysis_confidence, analysis_reasoning,
+              analysis_detected_granted, analysis_detected_expiry, analyzed_at
          FROM QualificationCertificate
         WHERE ${conditions.join(' AND ')}
         ORDER BY uploaded_at DESC`,
@@ -283,6 +386,53 @@ router.get('/:id/download', async (req, res, next) => {
     );
     res.setHeader('Cache-Control', 'private, no-store');
     res.send(rows[0].file_data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ============ POST /api/certificates/:id/analyze ============
+// Erneute LLM-Analyse für ein bereits hochgeladenes Zertifikat anstoßen.
+router.post('/:id/analyze', express.json(), async (req, res, next) => {
+  try {
+    const tenantKey = getTenantKey(req);
+    const { id } = req.params;
+    const { qualification_name, qualification_description } = req.body || {};
+
+    const [rows] = await db.execute(
+      `SELECT doctor_id, mime_type, file_data
+         FROM QualificationCertificate
+        WHERE id = ? AND tenant_key = ?`,
+      [id, tenantKey]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Zertifikat nicht gefunden' });
+    }
+    ensureCanAccessDoctor(req, rows[0].doctor_id);
+
+    if (!isAnalyzerConfigured()) {
+      return res.status(503).json({ error: 'Vision-LLM nicht konfiguriert' });
+    }
+    if (!qualification_name) {
+      return res.status(400).json({ error: 'qualification_name erforderlich' });
+    }
+
+    await db.execute(
+      `UPDATE QualificationCertificate SET analysis_status = 'pending' WHERE id = ? AND tenant_key = ?`,
+      [id, tenantKey]
+    );
+
+    runAnalysisAndPersist({
+      certificateId: id,
+      tenantKey,
+      buffer: rows[0].file_data,
+      mimeType: rows[0].mime_type,
+      qualificationName: qualification_name,
+      qualificationDescription: qualification_description,
+      fillDatesIfMissing: false,
+    });
+
+    res.json({ ok: true, status: 'pending' });
   } catch (err) {
     next(err);
   }

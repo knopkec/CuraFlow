@@ -12,6 +12,8 @@ export function useCertificates({ doctorId = null, qualificationId = null, enabl
 
     const queryKey = ['certificates', { doctorId, qualificationId }];
 
+    // Wenn mindestens eine Analyse noch im Status 'pending' steht, automatisch
+    // alle 3s neu laden, bis das Ergebnis vorliegt.
     const { data: certificates = [], isLoading, refetch } = useQuery({
         queryKey,
         queryFn: () => api.listCertificates({
@@ -19,6 +21,13 @@ export function useCertificates({ doctorId = null, qualificationId = null, enabl
             qualification_id: qualificationId || undefined,
         }),
         enabled,
+        refetchInterval: (query) => {
+            const data = query.state.data;
+            if (Array.isArray(data) && data.some((c) => c.analysis_status === 'pending')) {
+                return 3000;
+            }
+            return false;
+        },
     });
 
     const invalidate = () => {
@@ -41,6 +50,12 @@ export function useCertificates({ doctorId = null, qualificationId = null, enabl
         onSuccess: invalidate,
     });
 
+    const reanalyzeMutation = useMutation({
+        mutationFn: ({ id, qualification_name, qualification_description }) =>
+            api.reanalyzeCertificate(id, { qualification_name, qualification_description }),
+        onSuccess: invalidate,
+    });
+
     return {
         certificates,
         isLoading,
@@ -48,9 +63,11 @@ export function useCertificates({ doctorId = null, qualificationId = null, enabl
         uploadCertificate: uploadMutation.mutateAsync,
         updateCertificate: updateMutation.mutateAsync,
         deleteCertificate: deleteMutation.mutateAsync,
+        reanalyzeCertificate: reanalyzeMutation.mutateAsync,
         isUploading: uploadMutation.isPending,
         isUpdating: updateMutation.isPending,
         isDeleting: deleteMutation.isPending,
+        isReanalyzing: reanalyzeMutation.isPending,
     };
 }
 

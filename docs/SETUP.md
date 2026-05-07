@@ -97,6 +97,11 @@ SMTP_FROM=CuraFlow <noreply@example.com>
 
 # Optional: ElevenLabs (für Sprachsteuerung)
 ELEVENLABS_API_KEY=your_elevenlabs_key
+
+# Optional: Vision-LLM zur Prüfung von Qualifikations-Zertifikaten
+# (vLLM, OpenAI-kompatible API, ohne Auth – z.B. lokal gehostet)
+LLM_VISION_BASE_URL=http://localhost:8000/v1
+LLM_VISION_MODEL=Qwen2.5-VL-7B-Instruct
 ```
 
 ### Backend starten
@@ -211,6 +216,8 @@ Nach dem Start:
 | `SMTP_FROM` | ☐ | Absenderadresse für E-Mails |
 | `ELEVENLABS_API_KEY` | ☐ | API-Key für ElevenLabs (Sprachsteuerung) |
 | `ALLOWED_ORIGINS` | ☐ | Kommaseparierte CORS-Origins |
+| `LLM_VISION_BASE_URL` | ☐ | OpenAI-kompatible Basis-URL eines lokalen Vision-LLM (z.B. vLLM `http://localhost:8000/v1`). Aktiviert die automatische Prüfung hochgeladener Qualifikations-Zertifikate. |
+| `LLM_VISION_MODEL` | ☐ | Modellname, der dem Endpoint übergeben wird (z.B. `Qwen2.5-VL-7B-Instruct`). |
 
 ---
 

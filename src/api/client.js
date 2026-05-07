@@ -407,7 +407,7 @@ class APIClient {
     return this.request(`/api/certificates/expiring?days=${encodeURIComponent(days)}`);
   }
 
-  async uploadCertificate({ file, doctor_id, qualification_id, doctor_qualification_id, granted_date, expiry_date, notes }) {
+  async uploadCertificate({ file, doctor_id, qualification_id, doctor_qualification_id, granted_date, expiry_date, notes, qualification_name, qualification_description }) {
     if (!file) throw new Error('Datei fehlt');
     const formData = new FormData();
     formData.append('file', file);
@@ -417,6 +417,8 @@ class APIClient {
     if (granted_date) formData.append('granted_date', granted_date);
     if (expiry_date) formData.append('expiry_date', expiry_date);
     if (notes) formData.append('notes', notes);
+    if (qualification_name) formData.append('qualification_name', qualification_name);
+    if (qualification_description) formData.append('qualification_description', qualification_description);
 
     const token = this.getToken();
     const dbToken = this.getDbToken();
@@ -448,6 +450,13 @@ class APIClient {
   async deleteCertificate(id) {
     return this.request(`/api/certificates/${encodeURIComponent(id)}`, {
       method: 'DELETE',
+    });
+  }
+
+  async reanalyzeCertificate(id, { qualification_name, qualification_description } = {}) {
+    return this.request(`/api/certificates/${encodeURIComponent(id)}/analyze`, {
+      method: 'POST',
+      body: JSON.stringify({ qualification_name, qualification_description }),
     });
   }
 

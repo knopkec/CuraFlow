@@ -233,6 +233,20 @@ export async function runMasterMigrations(dbPool) {
     `);
   }, { duplicateCodes: ['ER_TABLE_EXISTS_ERROR'], duplicateReason: 'Tabelle bereits vorhanden' });
 
+  // Add LLM analysis columns to QualificationCertificate (idempotent)
+  await run('add_qc_analysis_columns', async () => {
+    await dbPool.execute(`ALTER TABLE QualificationCertificate ADD COLUMN IF NOT EXISTS analysis_status ENUM('pending','passed','warning','failed','skipped','error') DEFAULT 'pending'`);
+    await dbPool.execute(`ALTER TABLE QualificationCertificate ADD COLUMN IF NOT EXISTS analysis_is_certificate TINYINT(1) DEFAULT NULL`);
+    await dbPool.execute(`ALTER TABLE QualificationCertificate ADD COLUMN IF NOT EXISTS analysis_scope_match TINYINT(1) DEFAULT NULL`);
+    await dbPool.execute(`ALTER TABLE QualificationCertificate ADD COLUMN IF NOT EXISTS analysis_scope_detected VARCHAR(255) DEFAULT NULL`);
+    await dbPool.execute(`ALTER TABLE QualificationCertificate ADD COLUMN IF NOT EXISTS analysis_confidence FLOAT DEFAULT NULL`);
+    await dbPool.execute(`ALTER TABLE QualificationCertificate ADD COLUMN IF NOT EXISTS analysis_reasoning TEXT DEFAULT NULL`);
+    await dbPool.execute(`ALTER TABLE QualificationCertificate ADD COLUMN IF NOT EXISTS analysis_detected_granted DATE DEFAULT NULL`);
+    await dbPool.execute(`ALTER TABLE QualificationCertificate ADD COLUMN IF NOT EXISTS analysis_detected_expiry DATE DEFAULT NULL`);
+    await dbPool.execute(`ALTER TABLE QualificationCertificate ADD COLUMN IF NOT EXISTS analyzed_at DATETIME DEFAULT NULL`);
+  }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalten bereits vorhanden' });
+
+
   await run('create_time_account_table', async () => {
     await dbPool.execute(`
       CREATE TABLE IF NOT EXISTS TimeAccount (

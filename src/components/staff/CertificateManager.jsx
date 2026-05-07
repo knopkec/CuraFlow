@@ -3,7 +3,7 @@ import { format, differenceInCalendarDays, isValid, parseISO } from 'date-fns';
 import { de } from 'date-fns/locale';
 import {
     FileCheck, Upload, Trash2, Eye, AlertTriangle, Loader2,
-    CalendarClock, FileText, Save,
+    CalendarClock, FileText, Save, Sparkles, ShieldCheck, ShieldAlert,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -41,10 +41,46 @@ function getExpiryStatus(expiry_date) {
     return { kind: 'ok', days, label: `Gültig bis ${formatDate(expiry_date)}` };
 }
 
+function AnalysisBadge({ cert }) {
+    const status = cert.analysis_status;
+    if (!status || status === 'skipped') return null;
+
+    const map = {
+        pending:  { cls: 'bg-slate-100 text-slate-600 border-slate-300', icon: <Loader2 className="w-2.5 h-2.5 mr-1 animate-spin" />, label: 'KI-Prüfung läuft...' },
+        passed:   { cls: 'bg-emerald-50 text-emerald-700 border-emerald-300', icon: <ShieldCheck className="w-2.5 h-2.5 mr-1" />, label: 'KI-geprüft' },
+        warning:  { cls: 'bg-amber-50 text-amber-700 border-amber-300', icon: <ShieldAlert className="w-2.5 h-2.5 mr-1" />, label: 'KI: Scope passt evtl. nicht' },
+        failed:   { cls: 'bg-red-50 text-red-700 border-red-300', icon: <ShieldAlert className="w-2.5 h-2.5 mr-1" />, label: 'KI: kein Zertifikat erkannt' },
+        error:    { cls: 'bg-slate-100 text-slate-500 border-slate-300', icon: <AlertTriangle className="w-2.5 h-2.5 mr-1" />, label: 'KI-Prüfung fehlgeschlagen' },
+    };
+    const cfg = map[status] || map.error;
+
+    const tooltipParts = [];
+    if (cert.analysis_scope_detected) tooltipParts.push(`Erkannt: ${cert.analysis_scope_detected}`);
+    if (typeof cert.analysis_confidence === 'number') tooltipParts.push(`Konfidenz: ${(cert.analysis_confidence * 100).toFixed(0)}%`);
+    if (cert.analysis_reasoning) tooltipParts.push(cert.analysis_reasoning);
+
+    return (
+        <div className="mt-1">
+            <Badge
+                variant="outline"
+                className={`text-[10px] ${cfg.cls}`}
+                title={tooltipParts.join('\n') || undefined}
+            >
+                {cfg.icon}
+                {cfg.label}
+            </Badge>
+            {(status === 'warning' || status === 'failed') && cert.analysis_reasoning && (
+                <div className="text-[11px] text-slate-600 mt-1 italic">{cert.analysis_reasoning}</div>
+            )}
+        </div>
+    );
+}
+
 export default function CertificateManager({
     doctorId,
     qualificationId,
     qualificationName,
+    qualificationDescription,
     doctorQualificationId = null,
     canEdit = true,
 }) {
@@ -61,7 +97,7 @@ export default function CertificateManager({
 
     const {
         certificates, isLoading, uploadCertificate, deleteCertificate, updateCertificate,
-        isUploading, isDeleting, isUpdating,
+        reanalyzeCertificate, isUploading, isDeleting, isUpdating, isReanalyzing,
     } = useCertificates({
         doctorId,
         qualificationId,
@@ -111,11 +147,26 @@ export default function CertificateManager({
                 granted_date: grantedDate || undefined,
                 expiry_date: expiryDate || undefined,
                 notes: notes || undefined,
+                qualification_name: qualificationName,
+                qualification_description: qualificationDescription,
             });
-            toast({ title: 'Zertifikat hochgeladen', description: pendingFile.name });
+            toast({ title: 'Zertifikat hochgeladen', description: `${pendingFile.name} – Analyse läuft...` });
             resetUploadForm();
         } catch (err) {
             toast({ variant: 'destructive', title: 'Upload fehlgeschlagen', description: err.message });
+        }
+    };
+
+    const handleReanalyze = async (cert) => {
+        try {
+            await reanalyzeCertificate({
+                id: cert.id,
+                qualification_name: qualificationName,
+                qualification_description: qualificationDescription,
+            });
+            toast({ title: 'Analyse gestartet', description: 'Ergebnis erscheint in Kürze.' });
+        } catch (err) {
+            toast({ variant: 'destructive', title: 'Analyse fehlgeschlagen', description: err.message });
         }
     };
 
@@ -219,6 +270,7 @@ export default function CertificateManager({
                                                 {status.label}
                                             </Badge>
                                         )}
+                                        <AnalysisBadge cert={cert} />
                                         {cert.notes && (
                                             <div className="text-xs text-slate-500 mt-1 italic">{cert.notes}</div>
                                         )}
@@ -244,6 +296,19 @@ export default function CertificateManager({
                                                 title="Daten bearbeiten"
                                             >
                                                 <CalendarClock className="w-3.5 h-3.5" />
+                                            </Button>
+                                        )}
+                                        {canEdit && cert.analysis_status !== 'pending' && (
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-7 w-7 text-indigo-500 hover:text-indigo-700"
+                                                onClick={() => handleReanalyze(cert)}
+                                                title="KI-Prüfung neu starten"
+                                                disabled={isReanalyzing}
+                                            >
+                                                <Sparkles className="w-3.5 h-3.5" />
                                             </Button>
                                         )}
                                         {canEdit && (
