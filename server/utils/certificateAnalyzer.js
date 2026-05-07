@@ -203,42 +203,80 @@ export async function analyzeCertificate({
     visionMime,
   });
 
-  const body = {
-    model,
-    max_tokens: RESPONSE_MAX_TOKENS,
-    temperature: 0.1,
-    messages: [
-      { role: 'system', content: buildSystemPrompt() },
-      {
-        role: 'user',
-        // WICHTIG: Bei Qwen2.5-VL / vLLM-Multimodal muss das Bild VOR dem Text
-        // im content-Array stehen, sonst rendert das Chat-Template keinen
-        // Image-Placeholder (<|image_pad|>) und vLLM antwortet mit
-        // "Failed to apply prompt replacement for mm_items['image'][0]".
-        content: [
-          { type: 'image_url', image_url: { url: dataUrl } },
-          { type: 'text', text: buildUserPrompt({ qualificationName, qualificationDescription }) },
-        ],
-      },
-    ],
+  const userText = buildUserPrompt({ qualificationName, qualificationDescription });
+
+  // Manche Modelle erwarten `type: "image_url"` (Qwen2.5-VL, LLaVA), andere
+  // `type: "image"` (Gemma 3). vLLM akzeptiert beide am OpenAI-Endpoint, aber
+  // das gerenderte Chat-Template emitiert den Image-Platzhalter nur für den
+  // vom Modell unterstützten Typ. Wir probieren primär `image_url`, fallen
+  // bei "Failed to apply prompt replacement"-Fehlern auf `image` zurück.
+  // WICHTIG: Bild MUSS vor dem Text stehen.
+  const buildBody = (variant) => {
+    const imagePart = variant === 'image'
+      ? { type: 'image', image: dataUrl }
+      : { type: 'image_url', image_url: { url: dataUrl } };
+    return {
+      model,
+      max_tokens: RESPONSE_MAX_TOKENS,
+      temperature: 0.1,
+      messages: [
+        { role: 'system', content: buildSystemPrompt() },
+        {
+          role: 'user',
+          content: [imagePart, { type: 'text', text: userText }],
+        },
+      ],
+    };
   };
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   const startedAt = Date.now();
 
-  try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
+  const callLlm = async (variant) => {
+    return fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(buildBody(variant)),
       signal: controller.signal,
     });
+  };
+
+  try {
+    let variantUsed = 'image_url';
+    let response = await callLlm(variantUsed);
+
+    // Retry mit `type: "image"` falls vLLM das Image-Placeholder im
+    // Chat-Template nicht ersetzen konnte (typisch für Gemma).
+    if (response.status === 500) {
+      const errBody = await response.text().catch(() => '');
+      if (/Failed to apply prompt replacement|mm_items/i.test(errBody)) {
+        console.warn('[certificateAnalyzer] image_url-Variante abgelehnt, retry mit image-Typ', { snippet: errBody.slice(0, 200) });
+        variantUsed = 'image';
+        response = await callLlm(variantUsed);
+      } else {
+        // Body wieder verfügbar machen, indem wir aus dem bereits gelesenen Text einen Pseudo-Response bauen.
+        const errMsg = `LLM HTTP 500: ${errBody.slice(0, 400)}`;
+        console.error('[certificateAnalyzer] HTTP 500 vom LLM', { body: errBody.slice(0, 1000) });
+        return {
+          status: 'error',
+          is_certificate: null,
+          scope_match: null,
+          scope_detected: null,
+          granted_date: null,
+          expiry_date: null,
+          confidence: null,
+          reasoning: errMsg,
+          raw: null,
+          error: errMsg,
+        };
+      }
+    }
 
     if (!response.ok) {
       const text = await response.text().catch(() => '');
-      const errMsg = `LLM HTTP ${response.status}: ${text.slice(0, 400)}`;
-      console.error('[certificateAnalyzer] HTTP-Fehler vom LLM', { status: response.status, body: text.slice(0, 1000) });
+      const errMsg = `LLM HTTP ${response.status} (variant=${variantUsed}): ${text.slice(0, 400)}`;
+      console.error('[certificateAnalyzer] HTTP-Fehler vom LLM', { status: response.status, variant: variantUsed, body: text.slice(0, 1000) });
       return {
         status: 'error',
         is_certificate: null,
