@@ -16,6 +16,13 @@ function addMonthsIso(value, months) {
   return date.toISOString().slice(0, 10);
 }
 
+function endOfYearIso(value) {
+  if (!value) return null;
+  const [year] = value.split('-').map(Number);
+  if (!year) return null;
+  return `${String(year).padStart(4, '0')}-12-31`;
+}
+
 function compareIsoDate(a, b) {
   if (!a && !b) return 0;
   if (!a) return -1;
@@ -34,6 +41,23 @@ function deriveEffectiveUntil(certificate, validityMonths = null) {
   if (from && Number.isFinite(validityMonths) && validityMonths > 0) {
     return addMonthsIso(from, validityMonths);
   }
+  return null;
+}
+
+function getRenewalBlockEnd({ baseFrom, validityMonths, refreshFrom }) {
+  if (!baseFrom || !refreshFrom || !Number.isFinite(validityMonths) || validityMonths <= 0) {
+    return null;
+  }
+
+  for (let blockIndex = 1; blockIndex <= 50; blockIndex += 1) {
+    const blockEnd = addMonthsIso(baseFrom, validityMonths * blockIndex);
+    if (!blockEnd) return null;
+    const blockGraceEnd = endOfYearIso(blockEnd);
+    if (compareIsoDate(refreshFrom, blockGraceEnd) <= 0) {
+      return blockEnd;
+    }
+  }
+
   return null;
 }
 
@@ -78,6 +102,7 @@ export function computeQualificationEvidenceSummary({ qualification = {}, certif
         reason: 'Es fehlt sowohl der Grundnachweis als auch ein Verlängerungsnachweis.',
         missing_roles: ['base', 'refresh'],
         active_certificate_ids: [],
+        certificate_valid_until_by_id: {},
       };
     }
 
@@ -100,26 +125,45 @@ export function computeQualificationEvidenceSummary({ qualification = {}, certif
         reason: 'Es liegt nur eine Auffrischung vor, aber der erforderliche Grundnachweis fehlt.',
         missing_roles: ['base'],
         active_certificate_ids: refreshes.map((certificate) => certificate.id),
+        certificate_valid_until_by_id: {},
       };
     }
 
     const chains = bases.map((baseCertificate) => {
       const activeIds = [baseCertificate.id];
+      const certificateValidUntilById = {};
       const baseFrom = deriveEffectiveFrom(baseCertificate);
       let validUntil = deriveEffectiveUntil(baseCertificate, baseValidityMonths);
+      certificateValidUntilById[baseCertificate.id] = validUntil;
 
       for (const refreshCertificate of refreshes) {
         const refreshFrom = deriveEffectiveFrom(refreshCertificate);
         if (!refreshFrom || (baseFrom && compareIsoDate(refreshFrom, baseFrom) < 0)) continue;
-        if (validUntil && compareIsoDate(refreshFrom, validUntil) > 0) continue;
-        const refreshUntil = deriveEffectiveUntil(refreshCertificate, refreshValidityMonths);
+
+        const renewalBlockEnd = getRenewalBlockEnd({
+          baseFrom,
+          validityMonths: baseValidityMonths,
+          refreshFrom,
+        });
+        if (!renewalBlockEnd) continue;
+
+        const refreshUntil = addMonthsIso(
+          renewalBlockEnd,
+          Number.isFinite(refreshValidityMonths) ? refreshValidityMonths : baseValidityMonths
+        );
         if (refreshUntil && (!validUntil || compareIsoDate(refreshUntil, validUntil) > 0)) {
           validUntil = refreshUntil;
           activeIds.push(refreshCertificate.id);
+          certificateValidUntilById[refreshCertificate.id] = refreshUntil;
         }
       }
 
-      return { valid_from: baseFrom, valid_until: validUntil, active_certificate_ids: activeIds };
+      return {
+        valid_from: baseFrom,
+        valid_until: validUntil,
+        active_certificate_ids: activeIds,
+        certificate_valid_until_by_id: certificateValidUntilById,
+      };
     }).sort((left, right) => {
       const leftUntil = left.valid_until || '9999-12-31';
       const rightUntil = right.valid_until || '9999-12-31';
@@ -137,10 +181,11 @@ export function computeQualificationEvidenceSummary({ qualification = {}, certif
       reason: expired
         ? `Nachweiskette abgelaufen am ${winner.valid_until || 'unbekannt'}.`
         : (winner.valid_until
-            ? `Grundnachweis vorhanden${usedRefreshes ? `, ${usedRefreshes} Verlängerungsnachweis(e) berücksichtigt` : ''}. Gültig bis ${winner.valid_until}.`
-            : `Grundnachweis vorhanden${usedRefreshes ? `, ${usedRefreshes} Verlängerungsnachweis(e) berücksichtigt` : ''}.`),
+            ? `Grundnachweis vorhanden${usedRefreshes ? `, ${usedRefreshes} Verlängerungsnachweis(e) im Fachkunde-Block berücksichtigt` : ''}. Gültig bis ${winner.valid_until}.`
+            : `Grundnachweis vorhanden${usedRefreshes ? `, ${usedRefreshes} Verlängerungsnachweis(e) im Fachkunde-Block berücksichtigt` : ''}.`),
       missing_roles: [],
       active_certificate_ids: winner.active_certificate_ids,
+      certificate_valid_until_by_id: winner.certificate_valid_until_by_id,
     };
   }
 
@@ -175,5 +220,6 @@ export function computeQualificationEvidenceSummary({ qualification = {}, certif
       : (validUntil ? `Nachweis gültig bis ${validUntil}.` : 'Nachweis ohne Ablaufdatum hinterlegt.'),
     missing_roles: [],
     active_certificate_ids: [winner.id],
+    certificate_valid_until_by_id: winner.id ? { [winner.id]: validUntil } : {},
   };
 }

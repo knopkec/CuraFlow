@@ -47,6 +47,10 @@ function getExpiryStatus(expiry_date) {
     return { kind: 'ok', days, label: `Gültig bis ${formatDate(expiry_date)}` };
 }
 
+function getCertificateDisplayExpiry(cert, summary) {
+    return cert.expiry_date || summary?.certificate_valid_until_by_id?.[cert.id] || null;
+}
+
 function getRoleLabel(role, baseLabel, refreshLabel) {
     if (role === 'refresh') return refreshLabel || 'Verlängerung / Auffrischung';
     if (role === 'base') return baseLabel || 'Grundnachweis';
@@ -277,6 +281,32 @@ export default function CertificateManager({
     const requiredRoles = useMemo(() => getRequiredEvidenceRoles(qualificationConfig), [qualificationConfig]);
     const hasBaseEvidence = groupedCertificates.base.length > 0 || groupedCertificates.recertification.length > 0 || groupedCertificates.single.length > 0;
 
+    const pendingPreviewSummary = useMemo(() => {
+        if (!pendingFile || !checkResult?.upload_allowed) return null;
+        return computeQualificationEvidenceSummary({
+            qualification: qualificationConfig,
+            certificates: [
+                ...normalizedCertificates,
+                {
+                    id: '__pending__',
+                    evidence_role: normalizeEvidenceRole(pendingEvidenceRole, requirementMode),
+                    granted_date: grantedDate || checkResult.analysis?.detected_granted_date || null,
+                    expiry_date: expiryDate || checkResult.analysis?.detected_expiry_date || null,
+                    uploaded_at: new Date().toISOString(),
+                },
+            ],
+        });
+    }, [
+        pendingFile,
+        checkResult,
+        qualificationConfig,
+        normalizedCertificates,
+        pendingEvidenceRole,
+        requirementMode,
+        grantedDate,
+        expiryDate,
+    ]);
+
     const handleFileChange = async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -477,7 +507,8 @@ export default function CertificateManager({
     };
 
     const renderCertificateRow = (cert) => {
-        const status = getExpiryStatus(cert.expiry_date);
+        const displayExpiryDate = getCertificateDisplayExpiry(cert, summary);
+        const status = getExpiryStatus(displayExpiryDate);
         const isEditing = editId === cert.id;
         return (
             <li key={cert.id} className="bg-white border rounded p-2 text-sm">
@@ -501,7 +532,7 @@ export default function CertificateManager({
                         </div>
                         <div className="text-xs text-slate-500 flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
                             <span>Ausgestellt: {formatDate(cert.granted_date)}</span>
-                            <span>Gültig bis: {formatDate(cert.expiry_date)}</span>
+                            <span>Gültig bis: {formatDate(displayExpiryDate)}</span>
                             <span>{(cert.file_size / 1024).toFixed(0)} KB</span>
                         </div>
                         {status && (
@@ -730,6 +761,11 @@ export default function CertificateManager({
                             <div className="sm:col-span-2">
                                 <UploadCheckNotice checkResult={checkResult} isChecking={isChecking} />
                             </div>
+                            {pendingPreviewSummary?.valid_until && (
+                                <div className="sm:col-span-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+                                    Nach dem Upload wäre die Nachweiskette voraussichtlich bis {formatDate(pendingPreviewSummary.valid_until)} gültig.
+                                </div>
+                            )}
                             {renderRoleSelector({ value: pendingEvidenceRole, onChange: setPendingEvidenceRole, disabled: isChecking || isUploading })}
                             {requirementMode === 'base_refresh' && pendingEvidenceRole === 'refresh' && !hasBaseEvidence && (
                                 <div className="sm:col-span-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
