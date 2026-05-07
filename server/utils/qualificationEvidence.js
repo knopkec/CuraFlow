@@ -227,6 +227,10 @@ function buildBaseRefreshSummary({ qualification, certificates, today }) {
   const winner = chains[0];
   const expired = !!winner.valid_until && compareIsoDate(winner.valid_until, today) < 0;
   const usedRefreshes = Math.max(0, winner.active_certificate_ids.length - 1);
+  const propagatedValidUntilById = { ...winner.certificate_valid_until_by_id };
+  for (const certificateId of winner.active_certificate_ids) {
+    propagatedValidUntilById[certificateId] = winner.valid_until;
+  }
 
   return {
     status: expired ? 'expired' : 'valid',
@@ -239,7 +243,7 @@ function buildBaseRefreshSummary({ qualification, certificates, today }) {
           : `Grundnachweis vorhanden${usedRefreshes ? `, ${usedRefreshes} Verlängerungsnachweis(e) im Fachkunde-Block berücksichtigt` : ''}.`),
     missing_roles: [],
     active_certificate_ids: winner.active_certificate_ids,
-    certificate_valid_until_by_id: winner.certificate_valid_until_by_id,
+    certificate_valid_until_by_id: propagatedValidUntilById,
   };
 }
 

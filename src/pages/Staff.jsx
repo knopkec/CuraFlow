@@ -180,6 +180,13 @@ export default function StaffPage() {
     setIsFormOpen(true);
   };
 
+  const handleFormOpenChange = (open) => {
+    setIsFormOpen(open);
+    if (!open) {
+      setEditingDoctor(null);
+    }
+  };
+
   const handleQualificationToggle = (qualificationId) => {
     setSelectedQualificationIds((current) => (
       current.includes(qualificationId)
@@ -449,12 +456,15 @@ export default function StaffPage() {
 
       </Tabs>
 
-      <DoctorForm
-        open={isFormOpen}
-        onOpenChange={setIsFormOpen}
-        doctor={editingDoctor}
-        onSubmit={handleSave}
-      />
+      {isFormOpen && (
+        <DoctorForm
+          key={editingDoctor?.id || 'new-doctor'}
+          open={isFormOpen}
+          onOpenChange={handleFormOpenChange}
+          doctor={editingDoctor}
+          onSubmit={handleSave}
+        />
+      )}
     </div>
   );
 }
