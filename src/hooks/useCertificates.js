@@ -40,6 +40,10 @@ export function useCertificates({ doctorId = null, qualificationId = null, enabl
         onSuccess: invalidate,
     });
 
+    const checkMutation = useMutation({
+        mutationFn: (payload) => api.checkCertificate(payload),
+    });
+
     const updateMutation = useMutation({
         mutationFn: ({ id, ...rest }) => api.updateCertificate(id, rest),
         onSuccess: invalidate,
@@ -60,10 +64,12 @@ export function useCertificates({ doctorId = null, qualificationId = null, enabl
         certificates,
         isLoading,
         refetch,
+        checkCertificate: checkMutation.mutateAsync,
         uploadCertificate: uploadMutation.mutateAsync,
         updateCertificate: updateMutation.mutateAsync,
         deleteCertificate: deleteMutation.mutateAsync,
         reanalyzeCertificate: reanalyzeMutation.mutateAsync,
+        isChecking: checkMutation.isPending,
         isUploading: uploadMutation.isPending,
         isUpdating: updateMutation.isPending,
         isDeleting: deleteMutation.isPending,

@@ -76,6 +76,66 @@ function AnalysisBadge({ cert }) {
     );
 }
 
+function UploadCheckNotice({ checkResult, isChecking }) {
+    if (isChecking) {
+        return (
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 flex items-center gap-2">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Dokument wird automatisch geprüft. Upload ist erst nach erfolgreichem Scope-Match möglich.
+            </div>
+        );
+    }
+
+    if (!checkResult?.analysis) return null;
+
+    const status = checkResult.analysis.status;
+    const passed = checkResult.upload_allowed === true;
+
+    const cfg = passed
+        ? {
+            cls: 'border-emerald-300 bg-emerald-50 text-emerald-800',
+            icon: <ShieldCheck className="w-3.5 h-3.5 mt-0.5 shrink-0" />,
+            title: 'Scope passt. Upload ist freigegeben.',
+        }
+        : status === 'warning'
+            ? {
+                cls: 'border-amber-300 bg-amber-50 text-amber-800',
+                icon: <ShieldAlert className="w-3.5 h-3.5 mt-0.5 shrink-0" />,
+                title: 'Scope passt nicht sicher genug. Upload ist gesperrt.',
+            }
+            : status === 'failed'
+                ? {
+                    cls: 'border-red-300 bg-red-50 text-red-800',
+                    icon: <ShieldAlert className="w-3.5 h-3.5 mt-0.5 shrink-0" />,
+                    title: 'Kein passendes Zertifikat erkannt. Upload ist gesperrt.',
+                }
+                : {
+                    cls: 'border-slate-300 bg-slate-50 text-slate-700',
+                    icon: <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />,
+                    title: 'Prüfung konnte nicht freigeben. Upload ist gesperrt.',
+                };
+
+    return (
+        <div className={`rounded-md border px-3 py-2 text-xs ${cfg.cls}`}>
+            <div className="flex gap-2">
+                {cfg.icon}
+                <div className="space-y-1 min-w-0">
+                    <div className="font-medium">{cfg.title}</div>
+                    {checkResult.analysis.scope_detected && (
+                        <div>Erkannt: {checkResult.analysis.scope_detected}</div>
+                    )}
+                    {typeof checkResult.analysis.confidence === 'number' && (
+                        <div>Konfidenz: {(checkResult.analysis.confidence * 100).toFixed(0)}%</div>
+                    )}
+                    {checkResult.analysis.reasoning && (
+                        <div className="italic">{checkResult.analysis.reasoning}</div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export default function CertificateManager({
     doctorId,
     qualificationId,
@@ -86,18 +146,22 @@ export default function CertificateManager({
 }) {
     const { toast } = useToast();
     const fileInputRef = useRef(null);
+    const checkRequestRef = useRef(0);
     const [pendingFile, setPendingFile] = useState(null);
     const [grantedDate, setGrantedDate] = useState('');
     const [expiryDate, setExpiryDate] = useState('');
     const [notes, setNotes] = useState('');
+    const [approvalToken, setApprovalToken] = useState(null);
+    const [checkResult, setCheckResult] = useState(null);
     const [editId, setEditId] = useState(null);
     const [editGranted, setEditGranted] = useState('');
     const [editExpiry, setEditExpiry] = useState('');
     const [editNotes, setEditNotes] = useState('');
 
     const {
-        certificates, isLoading, uploadCertificate, deleteCertificate, updateCertificate,
+        certificates, isLoading, checkCertificate, uploadCertificate, deleteCertificate, updateCertificate,
         reanalyzeCertificate, isUploading, isDeleting, isUpdating, isReanalyzing,
+        isChecking,
     } = useCertificates({
         doctorId,
         qualificationId,
@@ -112,7 +176,7 @@ export default function CertificateManager({
         });
     }, [certificates]);
 
-    const handleFileChange = (e) => {
+    const handleFileChange = async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
         if (!ALLOWED_TYPES.includes(file.type)) {
@@ -125,7 +189,57 @@ export default function CertificateManager({
             e.target.value = '';
             return;
         }
+
         setPendingFile(file);
+        setGrantedDate('');
+        setExpiryDate('');
+        setNotes('');
+        setApprovalToken(null);
+
+        const requestId = Date.now();
+        checkRequestRef.current = requestId;
+        setCheckResult({
+            upload_allowed: false,
+            analysis: { status: 'pending', reasoning: null },
+        });
+
+        try {
+            const result = await checkCertificate({
+                file,
+                qualification_name: qualificationName,
+                qualification_description: qualificationDescription,
+            });
+            if (checkRequestRef.current !== requestId) return;
+
+            setCheckResult(result);
+            setApprovalToken(result.approval_token || null);
+            setGrantedDate(result.analysis?.detected_granted_date || '');
+            setExpiryDate(result.analysis?.detected_expiry_date || '');
+
+            if (result.upload_allowed) {
+                toast({
+                    title: 'Zertifikat geprüft',
+                    description: 'Scope passt. Erkannte Daten wurden übernommen, Upload ist freigegeben.',
+                });
+            } else {
+                toast({
+                    variant: 'destructive',
+                    title: 'Upload gesperrt',
+                    description: result.analysis?.reasoning || 'Die KI konnte kein passendes Zertifikat bestätigen.',
+                });
+            }
+        } catch (err) {
+            if (checkRequestRef.current !== requestId) return;
+            setApprovalToken(null);
+            setCheckResult({
+                upload_allowed: false,
+                analysis: {
+                    status: 'error',
+                    reasoning: err.message,
+                },
+            });
+            toast({ variant: 'destructive', title: 'Automatische Prüfung fehlgeschlagen', description: err.message });
+        }
     };
 
     const resetUploadForm = () => {
@@ -133,11 +247,21 @@ export default function CertificateManager({
         setGrantedDate('');
         setExpiryDate('');
         setNotes('');
+        setApprovalToken(null);
+        setCheckResult(null);
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
     const handleUpload = async () => {
         if (!pendingFile) return;
+        if (!approvalToken || !checkResult?.upload_allowed) {
+            toast({
+                variant: 'destructive',
+                title: 'Upload nicht freigegeben',
+                description: 'Das Dokument muss zuerst erfolgreich geprüft werden und zur Qualifikation passen.',
+            });
+            return;
+        }
         try {
             await uploadCertificate({
                 file: pendingFile,
@@ -147,10 +271,11 @@ export default function CertificateManager({
                 granted_date: grantedDate || undefined,
                 expiry_date: expiryDate || undefined,
                 notes: notes || undefined,
+                approval_token: approvalToken,
                 qualification_name: qualificationName,
                 qualification_description: qualificationDescription,
             });
-            toast({ title: 'Zertifikat hochgeladen', description: `${pendingFile.name} – Analyse läuft...` });
+            toast({ title: 'Zertifikat hochgeladen', description: `${pendingFile.name} wurde mit bestätigtem Scope gespeichert.` });
             resetUploadForm();
         } catch (err) {
             toast({ variant: 'destructive', title: 'Upload fehlgeschlagen', description: err.message });
@@ -216,6 +341,8 @@ export default function CertificateManager({
             toast({ variant: 'destructive', title: 'Speichern fehlgeschlagen', description: err.message });
         }
     };
+
+    const isUploadAllowed = !!pendingFile && !!approvalToken && checkResult?.upload_allowed === true;
 
     return (
         <div className="border rounded-md bg-amber-50/30 border-amber-200 p-3 space-y-3">
@@ -402,12 +529,16 @@ export default function CertificateManager({
                     />
                     {pendingFile && (
                         <div className="grid gap-2 sm:grid-cols-2">
+                            <div className="sm:col-span-2">
+                                <UploadCheckNotice checkResult={checkResult} isChecking={isChecking} />
+                            </div>
                             <div className="space-y-1">
                                 <Label className="text-xs">Ausstellungsdatum</Label>
                                 <Input
                                     type="date"
                                     value={grantedDate}
                                     onChange={(e) => setGrantedDate(e.target.value)}
+                                    disabled={isChecking}
                                 />
                             </div>
                             <div className="space-y-1">
@@ -416,6 +547,7 @@ export default function CertificateManager({
                                     type="date"
                                     value={expiryDate}
                                     onChange={(e) => setExpiryDate(e.target.value)}
+                                    disabled={isChecking}
                                 />
                             </div>
                             <div className="space-y-1 sm:col-span-2">
@@ -425,14 +557,15 @@ export default function CertificateManager({
                                     onChange={(e) => setNotes(e.target.value)}
                                     placeholder="z.B. ausstellende Stelle"
                                     maxLength={500}
+                                    disabled={isChecking}
                                 />
                             </div>
                             <div className="sm:col-span-2 flex justify-end gap-2">
-                                <Button type="button" variant="outline" size="sm" onClick={resetUploadForm}>
+                                <Button type="button" variant="outline" size="sm" onClick={resetUploadForm} disabled={isChecking || isUploading}>
                                     Abbrechen
                                 </Button>
-                                <Button type="button" size="sm" onClick={handleUpload} disabled={isUploading}>
-                                    {isUploading ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Upload className="w-3 h-3 mr-1" />}
+                                <Button type="button" size="sm" onClick={handleUpload} disabled={isChecking || isUploading || !isUploadAllowed}>
+                                    {isUploading || isChecking ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Upload className="w-3 h-3 mr-1" />}
                                     Hochladen
                                 </Button>
                             </div>

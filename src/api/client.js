@@ -407,7 +407,36 @@ class APIClient {
     return this.request(`/api/certificates/expiring?days=${encodeURIComponent(days)}`);
   }
 
-  async uploadCertificate({ file, doctor_id, qualification_id, doctor_qualification_id, granted_date, expiry_date, notes, qualification_name, qualification_description }) {
+  async checkCertificate({ file, qualification_name, qualification_description }) {
+    if (!file) throw new Error('Datei fehlt');
+    if (!qualification_name) throw new Error('qualification_name fehlt');
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('qualification_name', qualification_name);
+    if (qualification_description) formData.append('qualification_description', qualification_description);
+
+    const token = this.getToken();
+    const dbToken = this.getDbToken();
+    const headers = {
+      ...(token && { Authorization: `Bearer ${token}` }),
+      ...(dbToken && { 'X-DB-Token': dbToken }),
+    };
+
+    const response = await fetch(`${this.baseURL}/api/certificates/check`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `Prüfung fehlgeschlagen (HTTP ${response.status})`);
+    }
+    return response.json();
+  }
+
+  async uploadCertificate({ file, doctor_id, qualification_id, doctor_qualification_id, granted_date, expiry_date, notes, qualification_name, qualification_description, approval_token }) {
     if (!file) throw new Error('Datei fehlt');
     const formData = new FormData();
     formData.append('file', file);
@@ -419,6 +448,7 @@ class APIClient {
     if (notes) formData.append('notes', notes);
     if (qualification_name) formData.append('qualification_name', qualification_name);
     if (qualification_description) formData.append('qualification_description', qualification_description);
+    if (approval_token) formData.append('approval_token', approval_token);
 
     const token = this.getToken();
     const dbToken = this.getDbToken();
