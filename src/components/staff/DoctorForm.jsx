@@ -151,7 +151,7 @@ export default function DoctorForm({ open, onOpenChange, doctor, onSubmit }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-2xl lg:max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{doctor ? "Teammitglied bearbeiten" : "Neues Teammitglied hinzufügen"}</DialogTitle>
         </DialogHeader>
