@@ -16,6 +16,12 @@ import {
     AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { useCertificates, openCertificateInNewTab } from '@/hooks/useCertificates';
+import {
+    computeQualificationEvidenceSummary,
+    getRequiredEvidenceRoles,
+    normalizeEvidenceRole,
+    normalizeRequirementMode,
+} from '@/lib/qualificationEvidence';
 
 const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
 const MAX_SIZE = 5 * 1024 * 1024;
@@ -39,6 +45,43 @@ function getExpiryStatus(expiry_date) {
     if (days < 0) return { kind: 'expired', days, label: `Abgelaufen seit ${Math.abs(days)} Tagen` };
     if (days <= WARN_DAYS) return { kind: 'soon', days, label: `Läuft in ${days} Tagen ab` };
     return { kind: 'ok', days, label: `Gültig bis ${formatDate(expiry_date)}` };
+}
+
+function getRoleLabel(role, baseLabel, refreshLabel) {
+    if (role === 'refresh') return refreshLabel || 'Verlängerung / Auffrischung';
+    if (role === 'base') return baseLabel || 'Grundnachweis';
+    if (role === 'recertification') return 'Neuerwerb / Rezertifizierung';
+    if (role === 'supplement') return 'Ergänzender Nachweis';
+    return 'Nachweis';
+}
+
+function getSummaryBadge(summary) {
+    switch (summary?.status) {
+        case 'valid':
+            return {
+                cls: 'bg-emerald-50 text-emerald-700 border-emerald-300',
+                icon: <ShieldCheck className="w-3 h-3 mr-1" />,
+                label: summary.valid_until ? `Gültig bis ${formatDate(summary.valid_until)}` : 'Gültig',
+            };
+        case 'expired':
+            return {
+                cls: 'bg-red-50 text-red-700 border-red-300',
+                icon: <AlertTriangle className="w-3 h-3 mr-1" />,
+                label: summary.valid_until ? `Abgelaufen am ${formatDate(summary.valid_until)}` : 'Abgelaufen',
+            };
+        case 'incomplete':
+            return {
+                cls: 'bg-amber-50 text-amber-700 border-amber-300',
+                icon: <ShieldAlert className="w-3 h-3 mr-1" />,
+                label: 'Nachweise unvollständig',
+            };
+        default:
+            return {
+                cls: 'bg-slate-100 text-slate-600 border-slate-300',
+                icon: <FileCheck className="w-3 h-3 mr-1" />,
+                label: 'Noch kein gültiger Nachweis',
+            };
+    }
 }
 
 function AnalysisBadge({ cert }) {
@@ -141,19 +184,30 @@ export default function CertificateManager({
     qualificationId,
     qualificationName,
     qualificationDescription,
+    qualificationRequirementMode = 'single_document',
+    qualificationValidityMonths = null,
+    qualificationRefreshValidityMonths = null,
+    qualificationBaseLabel = 'Grundnachweis',
+    qualificationRefreshLabel = 'Verlängerung / Auffrischung',
     doctorQualificationId = null,
+    doctorQualification = null,
     canEdit = true,
 }) {
+    const requirementMode = normalizeRequirementMode(qualificationRequirementMode);
     const { toast } = useToast();
     const fileInputRef = useRef(null);
     const checkRequestRef = useRef(0);
     const [pendingFile, setPendingFile] = useState(null);
+    const [pendingEvidenceRole, setPendingEvidenceRole] = useState(
+        requirementMode === 'base_refresh' ? 'base' : 'single'
+    );
     const [grantedDate, setGrantedDate] = useState('');
     const [expiryDate, setExpiryDate] = useState('');
     const [notes, setNotes] = useState('');
     const [approvalToken, setApprovalToken] = useState(null);
     const [checkResult, setCheckResult] = useState(null);
     const [editId, setEditId] = useState(null);
+    const [editEvidenceRole, setEditEvidenceRole] = useState('single');
     const [editGranted, setEditGranted] = useState('');
     const [editExpiry, setEditExpiry] = useState('');
     const [editNotes, setEditNotes] = useState('');
@@ -168,13 +222,60 @@ export default function CertificateManager({
         enabled: !!doctorId && !!qualificationId,
     });
 
+    const normalizedCertificates = useMemo(() => {
+        return certificates.map((cert) => ({
+            ...cert,
+            evidence_role: normalizeEvidenceRole(cert.evidence_role, requirementMode),
+        }));
+    }, [certificates, requirementMode]);
+
     const sorted = useMemo(() => {
-        return [...certificates].sort((a, b) => {
+        return [...normalizedCertificates].sort((a, b) => {
             const ax = a.expiry_date || a.uploaded_at || '';
             const bx = b.expiry_date || b.uploaded_at || '';
             return String(bx).localeCompare(String(ax));
         });
-    }, [certificates]);
+    }, [normalizedCertificates]);
+
+    const qualificationConfig = useMemo(() => ({
+        certificate_requirement_mode: requirementMode,
+        certificate_validity_months: qualificationValidityMonths,
+        certificate_refresh_validity_months: qualificationRefreshValidityMonths,
+        certificate_base_label: qualificationBaseLabel,
+        certificate_refresh_label: qualificationRefreshLabel,
+    }), [
+        requirementMode,
+        qualificationValidityMonths,
+        qualificationRefreshValidityMonths,
+        qualificationBaseLabel,
+        qualificationRefreshLabel,
+    ]);
+
+    const summary = useMemo(() => computeQualificationEvidenceSummary({
+        qualification: qualificationConfig,
+        certificates: normalizedCertificates,
+    }), [normalizedCertificates, qualificationConfig]);
+
+    const summaryBadge = useMemo(() => getSummaryBadge(summary), [summary]);
+
+    const groupedCertificates = useMemo(() => {
+        const buckets = {
+            single: [],
+            base: [],
+            refresh: [],
+            supplement: [],
+            recertification: [],
+        };
+        for (const cert of sorted) {
+            const role = normalizeEvidenceRole(cert.evidence_role, requirementMode);
+            if (!buckets[role]) buckets[role] = [];
+            buckets[role].push(cert);
+        }
+        return buckets;
+    }, [sorted, requirementMode]);
+
+    const requiredRoles = useMemo(() => getRequiredEvidenceRoles(qualificationConfig), [qualificationConfig]);
+    const hasBaseEvidence = groupedCertificates.base.length > 0 || groupedCertificates.recertification.length > 0 || groupedCertificates.single.length > 0;
 
     const handleFileChange = async (e) => {
         const file = e.target.files?.[0];
@@ -191,6 +292,7 @@ export default function CertificateManager({
         }
 
         setPendingFile(file);
+        setPendingEvidenceRole(requirementMode === 'base_refresh' ? pendingEvidenceRole : 'single');
         setGrantedDate('');
         setExpiryDate('');
         setNotes('');
@@ -244,6 +346,7 @@ export default function CertificateManager({
 
     const resetUploadForm = () => {
         setPendingFile(null);
+        setPendingEvidenceRole(requirementMode === 'base_refresh' ? 'base' : 'single');
         setGrantedDate('');
         setExpiryDate('');
         setNotes('');
@@ -268,6 +371,7 @@ export default function CertificateManager({
                 doctor_id: doctorId,
                 qualification_id: qualificationId,
                 doctor_qualification_id: doctorQualificationId,
+                evidence_role: normalizeEvidenceRole(pendingEvidenceRole, requirementMode),
                 granted_date: grantedDate || undefined,
                 expiry_date: expiryDate || undefined,
                 notes: notes || undefined,
@@ -314,6 +418,7 @@ export default function CertificateManager({
 
     const startEdit = (cert) => {
         setEditId(cert.id);
+        setEditEvidenceRole(normalizeEvidenceRole(cert.evidence_role, requirementMode));
         setEditGranted(cert.granted_date || '');
         setEditExpiry(cert.expiry_date || '');
         setEditNotes(cert.notes || '');
@@ -321,6 +426,7 @@ export default function CertificateManager({
 
     const cancelEdit = () => {
         setEditId(null);
+        setEditEvidenceRole(requirementMode === 'base_refresh' ? 'base' : 'single');
         setEditGranted('');
         setEditExpiry('');
         setEditNotes('');
@@ -331,6 +437,7 @@ export default function CertificateManager({
         try {
             await updateCertificate({
                 id: editId,
+                evidence_role: normalizeEvidenceRole(editEvidenceRole, requirementMode),
                 granted_date: editGranted || null,
                 expiry_date: editExpiry || null,
                 notes: editNotes || null,
@@ -344,177 +451,268 @@ export default function CertificateManager({
 
     const isUploadAllowed = !!pendingFile && !!approvalToken && checkResult?.upload_allowed === true;
 
+    const renderRoleSelector = ({ value, onChange, disabled = false, compact = false }) => {
+        if (requirementMode !== 'base_refresh') return null;
+        const options = [
+            { value: 'base', label: qualificationBaseLabel },
+            { value: 'refresh', label: qualificationRefreshLabel },
+        ];
+        return (
+            <div className={`flex flex-wrap gap-2 ${compact ? '' : 'sm:col-span-2'}`}>
+                {options.map((option) => (
+                    <Button
+                        key={option.value}
+                        type="button"
+                        size="sm"
+                        variant={value === option.value ? 'default' : 'outline'}
+                        onClick={() => onChange(option.value)}
+                        disabled={disabled}
+                        className="h-8"
+                    >
+                        {option.label}
+                    </Button>
+                ))}
+            </div>
+        );
+    };
+
+    const renderCertificateRow = (cert) => {
+        const status = getExpiryStatus(cert.expiry_date);
+        const isEditing = editId === cert.id;
+        return (
+            <li key={cert.id} className="bg-white border rounded p-2 text-sm">
+                <div className="flex items-start gap-2">
+                    <FileText className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => handleView(cert)}
+                                className="font-medium text-slate-800 truncate text-left hover:text-indigo-600"
+                                title={cert.file_name}
+                            >
+                                {cert.file_name}
+                            </button>
+                            {requirementMode === 'base_refresh' && (
+                                <Badge variant="outline" className="text-[10px] bg-sky-50 text-sky-700 border-sky-300">
+                                    {getRoleLabel(cert.evidence_role, qualificationBaseLabel, qualificationRefreshLabel)}
+                                </Badge>
+                            )}
+                        </div>
+                        <div className="text-xs text-slate-500 flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+                            <span>Ausgestellt: {formatDate(cert.granted_date)}</span>
+                            <span>Gültig bis: {formatDate(cert.expiry_date)}</span>
+                            <span>{(cert.file_size / 1024).toFixed(0)} KB</span>
+                        </div>
+                        {status && (
+                            <Badge
+                                variant="outline"
+                                className={`text-[10px] mt-1 ${
+                                    status.kind === 'expired'
+                                        ? 'bg-red-50 text-red-700 border-red-300'
+                                        : status.kind === 'soon'
+                                            ? 'bg-amber-50 text-amber-700 border-amber-300'
+                                            : 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                                }`}
+                            >
+                                {status.kind !== 'ok' && <AlertTriangle className="w-2.5 h-2.5 mr-1" />}
+                                {status.label}
+                            </Badge>
+                        )}
+                        <AnalysisBadge cert={cert} />
+                        {cert.notes && (
+                            <div className="text-xs text-slate-500 mt-1 italic">{cert.notes}</div>
+                        )}
+                    </div>
+                    <div className="flex flex-col gap-1 shrink-0">
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => handleView(cert)}
+                            title="Anzeigen"
+                        >
+                            <Eye className="w-3.5 h-3.5" />
+                        </Button>
+                        {canEdit && !isEditing && (
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={() => startEdit(cert)}
+                                title="Daten bearbeiten"
+                            >
+                                <CalendarClock className="w-3.5 h-3.5" />
+                            </Button>
+                        )}
+                        {canEdit && cert.analysis_status !== 'pending' && (
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-indigo-500 hover:text-indigo-700"
+                                onClick={() => handleReanalyze(cert)}
+                                title="KI-Prüfung neu starten"
+                                disabled={isReanalyzing}
+                            >
+                                <Sparkles className="w-3.5 h-3.5" />
+                            </Button>
+                        )}
+                        {canEdit && (
+                            <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7 text-red-500 hover:text-red-700"
+                                        title="Löschen"
+                                    >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                    </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                        <AlertDialogTitle>Zertifikat löschen?</AlertDialogTitle>
+                                        <AlertDialogDescription>
+                                            „{cert.file_name}" wird unwiderruflich gelöscht.
+                                        </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                        <AlertDialogCancel>Abbrechen</AlertDialogCancel>
+                                        <AlertDialogAction
+                                            onClick={() => handleDelete(cert)}
+                                            className="bg-red-600 hover:bg-red-700"
+                                            disabled={isDeleting}
+                                        >
+                                            Löschen
+                                        </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                </AlertDialogContent>
+                            </AlertDialog>
+                        )}
+                    </div>
+                </div>
+                {isEditing && (
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2 border-t pt-2">
+                        {renderRoleSelector({ value: editEvidenceRole, onChange: setEditEvidenceRole, compact: false })}
+                        <div className="space-y-1">
+                            <Label className="text-xs">Ausstellungsdatum</Label>
+                            <Input
+                                type="date"
+                                value={editGranted}
+                                onChange={(e) => setEditGranted(e.target.value)}
+                            />
+                        </div>
+                        <div className="space-y-1">
+                            <Label className="text-xs">Ablaufdatum</Label>
+                            <Input
+                                type="date"
+                                value={editExpiry}
+                                onChange={(e) => setEditExpiry(e.target.value)}
+                            />
+                        </div>
+                        <div className="space-y-1 sm:col-span-2">
+                            <Label className="text-xs">Notiz</Label>
+                            <Input
+                                value={editNotes}
+                                onChange={(e) => setEditNotes(e.target.value)}
+                                placeholder="optional"
+                                maxLength={500}
+                            />
+                        </div>
+                        <div className="sm:col-span-2 flex justify-end gap-2">
+                            <Button type="button" variant="outline" size="sm" onClick={cancelEdit}>
+                                Abbrechen
+                            </Button>
+                            <Button type="button" size="sm" onClick={saveEdit} disabled={isUpdating}>
+                                {isUpdating ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Save className="w-3 h-3 mr-1" />}
+                                Speichern
+                            </Button>
+                        </div>
+                    </div>
+                )}
+            </li>
+        );
+    };
+
+    const renderCertificateSection = (title, role, items, emptyText) => (
+        <div className="space-y-2">
+            <div className="flex items-center gap-2">
+                <div className="text-xs font-semibold text-slate-600">{title}</div>
+                {requiredRoles.includes(role) && (
+                    <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700 bg-amber-50">
+                        Pflicht
+                    </Badge>
+                )}
+            </div>
+            {items.length === 0 ? (
+                <div className="text-xs text-slate-500 italic border rounded-md bg-white/70 px-3 py-2">
+                    {emptyText}
+                </div>
+            ) : (
+                <ul className="space-y-2">
+                    {items.map(renderCertificateRow)}
+                </ul>
+            )}
+        </div>
+    );
+
     return (
         <div className="border rounded-md bg-amber-50/30 border-amber-200 p-3 space-y-3">
-            <div className="flex items-center gap-2 text-sm font-medium text-amber-800">
-                <FileCheck className="w-4 h-4" />
-                Zertifikat erforderlich – {qualificationName || 'Qualifikation'}
+            <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm font-medium text-amber-800">
+                    <FileCheck className="w-4 h-4" />
+                    Zertifikat erforderlich – {qualificationName || 'Qualifikation'}
+                </div>
+                <div className="rounded-md border bg-white/70 px-3 py-2 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className={`text-[10px] ${summaryBadge.cls}`}>
+                            {summaryBadge.icon}
+                            {summaryBadge.label}
+                        </Badge>
+                        {doctorQualification?.certificate_status && (
+                            <Badge variant="outline" className="text-[10px] border-slate-300 text-slate-600 bg-slate-50">
+                                Status: {doctorQualification.certificate_status}
+                            </Badge>
+                        )}
+                    </div>
+                    <div className="text-xs text-slate-600">{summary.reason}</div>
+                    {requirementMode === 'base_refresh' && (
+                        <div className="text-[11px] text-slate-500">
+                            Modell: {qualificationBaseLabel} + {qualificationRefreshLabel}
+                        </div>
+                    )}
+                </div>
             </div>
 
             {isLoading ? (
                 <div className="flex items-center gap-2 text-xs text-slate-500">
                     <Loader2 className="w-3 h-3 animate-spin" /> Wird geladen...
                 </div>
-            ) : sorted.length === 0 ? (
-                <div className="text-xs text-slate-500 italic">
-                    Noch kein Zertifikat hinterlegt.
-                </div>
             ) : (
-                <ul className="space-y-2">
-                    {sorted.map((cert) => {
-                        const status = getExpiryStatus(cert.expiry_date);
-                        const isEditing = editId === cert.id;
-                        return (
-                            <li key={cert.id} className="bg-white border rounded p-2 text-sm">
-                                <div className="flex items-start gap-2">
-                                    <FileText className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
-                                    <div className="flex-1 min-w-0">
-                                        <button
-                                            type="button"
-                                            onClick={() => handleView(cert)}
-                                            className="font-medium text-slate-800 truncate text-left hover:text-indigo-600"
-                                            title={cert.file_name}
-                                        >
-                                            {cert.file_name}
-                                        </button>
-                                        <div className="text-xs text-slate-500 flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
-                                            <span>Ausgestellt: {formatDate(cert.granted_date)}</span>
-                                            <span>Gültig bis: {formatDate(cert.expiry_date)}</span>
-                                            <span>{(cert.file_size / 1024).toFixed(0)} KB</span>
-                                        </div>
-                                        {status && (
-                                            <Badge
-                                                variant="outline"
-                                                className={`text-[10px] mt-1 ${
-                                                    status.kind === 'expired'
-                                                        ? 'bg-red-50 text-red-700 border-red-300'
-                                                        : status.kind === 'soon'
-                                                        ? 'bg-amber-50 text-amber-700 border-amber-300'
-                                                        : 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                                                }`}
-                                            >
-                                                {status.kind !== 'ok' && <AlertTriangle className="w-2.5 h-2.5 mr-1" />}
-                                                {status.label}
-                                            </Badge>
-                                        )}
-                                        <AnalysisBadge cert={cert} />
-                                        {cert.notes && (
-                                            <div className="text-xs text-slate-500 mt-1 italic">{cert.notes}</div>
-                                        )}
-                                    </div>
-                                    <div className="flex flex-col gap-1 shrink-0">
-                                        <Button
-                                            type="button"
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-7 w-7"
-                                            onClick={() => handleView(cert)}
-                                            title="Anzeigen"
-                                        >
-                                            <Eye className="w-3.5 h-3.5" />
-                                        </Button>
-                                        {canEdit && !isEditing && (
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                size="icon"
-                                                className="h-7 w-7"
-                                                onClick={() => startEdit(cert)}
-                                                title="Daten bearbeiten"
-                                            >
-                                                <CalendarClock className="w-3.5 h-3.5" />
-                                            </Button>
-                                        )}
-                                        {canEdit && cert.analysis_status !== 'pending' && (
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                size="icon"
-                                                className="h-7 w-7 text-indigo-500 hover:text-indigo-700"
-                                                onClick={() => handleReanalyze(cert)}
-                                                title="KI-Prüfung neu starten"
-                                                disabled={isReanalyzing}
-                                            >
-                                                <Sparkles className="w-3.5 h-3.5" />
-                                            </Button>
-                                        )}
-                                        {canEdit && (
-                                            <AlertDialog>
-                                                <AlertDialogTrigger asChild>
-                                                    <Button
-                                                        type="button"
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="h-7 w-7 text-red-500 hover:text-red-700"
-                                                        title="Löschen"
-                                                    >
-                                                        <Trash2 className="w-3.5 h-3.5" />
-                                                    </Button>
-                                                </AlertDialogTrigger>
-                                                <AlertDialogContent>
-                                                    <AlertDialogHeader>
-                                                        <AlertDialogTitle>Zertifikat löschen?</AlertDialogTitle>
-                                                        <AlertDialogDescription>
-                                                            „{cert.file_name}" wird unwiderruflich gelöscht.
-                                                        </AlertDialogDescription>
-                                                    </AlertDialogHeader>
-                                                    <AlertDialogFooter>
-                                                        <AlertDialogCancel>Abbrechen</AlertDialogCancel>
-                                                        <AlertDialogAction
-                                                            onClick={() => handleDelete(cert)}
-                                                            className="bg-red-600 hover:bg-red-700"
-                                                            disabled={isDeleting}
-                                                        >
-                                                            Löschen
-                                                        </AlertDialogAction>
-                                                    </AlertDialogFooter>
-                                                </AlertDialogContent>
-                                            </AlertDialog>
-                                        )}
-                                    </div>
-                                </div>
-                                {isEditing && (
-                                    <div className="mt-2 grid gap-2 sm:grid-cols-2 border-t pt-2">
-                                        <div className="space-y-1">
-                                            <Label className="text-xs">Ausstellungsdatum</Label>
-                                            <Input
-                                                type="date"
-                                                value={editGranted}
-                                                onChange={(e) => setEditGranted(e.target.value)}
-                                            />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <Label className="text-xs">Ablaufdatum</Label>
-                                            <Input
-                                                type="date"
-                                                value={editExpiry}
-                                                onChange={(e) => setEditExpiry(e.target.value)}
-                                            />
-                                        </div>
-                                        <div className="space-y-1 sm:col-span-2">
-                                            <Label className="text-xs">Notiz</Label>
-                                            <Input
-                                                value={editNotes}
-                                                onChange={(e) => setEditNotes(e.target.value)}
-                                                placeholder="optional"
-                                                maxLength={500}
-                                            />
-                                        </div>
-                                        <div className="sm:col-span-2 flex justify-end gap-2">
-                                            <Button type="button" variant="outline" size="sm" onClick={cancelEdit}>
-                                                Abbrechen
-                                            </Button>
-                                            <Button type="button" size="sm" onClick={saveEdit} disabled={isUpdating}>
-                                                {isUpdating ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Save className="w-3 h-3 mr-1" />}
-                                                Speichern
-                                            </Button>
-                                        </div>
-                                    </div>
+                <div className="space-y-3">
+                    {requirementMode === 'base_refresh'
+                        ? (
+                            <>
+                                {renderCertificateSection(
+                                    qualificationBaseLabel,
+                                    'base',
+                                    [...groupedCertificates.base, ...groupedCertificates.recertification, ...groupedCertificates.single],
+                                    `Noch kein ${qualificationBaseLabel.toLowerCase()} hinterlegt.`
                                 )}
-                            </li>
-                        );
-                    })}
-                </ul>
+                                {renderCertificateSection(
+                                    qualificationRefreshLabel,
+                                    'refresh',
+                                    groupedCertificates.refresh,
+                                    `Noch kein ${qualificationRefreshLabel.toLowerCase()} hinterlegt.`
+                                )}
+                            </>
+                        )
+                        : renderCertificateSection('Nachweise', 'single', groupedCertificates.single, 'Noch kein Nachweis hinterlegt.')}
+                </div>
             )}
 
             {canEdit && (
@@ -532,6 +730,12 @@ export default function CertificateManager({
                             <div className="sm:col-span-2">
                                 <UploadCheckNotice checkResult={checkResult} isChecking={isChecking} />
                             </div>
+                            {renderRoleSelector({ value: pendingEvidenceRole, onChange: setPendingEvidenceRole, disabled: isChecking || isUploading })}
+                            {requirementMode === 'base_refresh' && pendingEvidenceRole === 'refresh' && !hasBaseEvidence && (
+                                <div className="sm:col-span-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                                    Zuerst muss ein {qualificationBaseLabel.toLowerCase()} hinterlegt werden. Ohne Grundnachweis wird die Verlängerung serverseitig abgelehnt.
+                                </div>
+                            )}
                             <div className="space-y-1">
                                 <Label className="text-xs">Ausstellungsdatum</Label>
                                 <Input
@@ -564,7 +768,7 @@ export default function CertificateManager({
                                 <Button type="button" variant="outline" size="sm" onClick={resetUploadForm} disabled={isChecking || isUploading}>
                                     Abbrechen
                                 </Button>
-                                <Button type="button" size="sm" onClick={handleUpload} disabled={isChecking || isUploading || !isUploadAllowed}>
+                                <Button type="button" size="sm" onClick={handleUpload} disabled={isChecking || isUploading || !isUploadAllowed || (requirementMode === 'base_refresh' && pendingEvidenceRole === 'refresh' && !hasBaseEvidence)}>
                                     {isUploading || isChecking ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Upload className="w-3 h-3 mr-1" />}
                                     Hochladen
                                 </Button>

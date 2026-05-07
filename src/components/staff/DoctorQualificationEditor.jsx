@@ -135,7 +135,13 @@ export default function DoctorQualificationEditor({ doctorId, selectedQualIds = 
                                     qualificationId={qual.id}
                                     qualificationName={qual.name}
                                     qualificationDescription={qual.description}
+                                    qualificationRequirementMode={qual.certificate_requirement_mode}
+                                    qualificationValidityMonths={qual.certificate_validity_months}
+                                    qualificationRefreshValidityMonths={qual.certificate_refresh_validity_months}
+                                    qualificationBaseLabel={qual.certificate_base_label}
+                                    qualificationRefreshLabel={qual.certificate_refresh_label}
                                     doctorQualificationId={dqEntry?.id || null}
+                                    doctorQualification={dqEntry || null}
                                 />
                             );
                         })}
@@ -223,7 +229,13 @@ export default function DoctorQualificationEditor({ doctorId, selectedQualIds = 
                                             qualificationId={qual.id}
                                             qualificationName={qual.name}
                                             qualificationDescription={qual.description}
+                                            qualificationRequirementMode={qual.certificate_requirement_mode}
+                                            qualificationValidityMonths={qual.certificate_validity_months}
+                                            qualificationRefreshValidityMonths={qual.certificate_refresh_validity_months}
+                                            qualificationBaseLabel={qual.certificate_base_label}
+                                            qualificationRefreshLabel={qual.certificate_refresh_label}
                                             doctorQualificationId={dqEntry?.id || null}
+                                            doctorQualification={dqEntry || null}
                                         />
                                     );
                                 })}
