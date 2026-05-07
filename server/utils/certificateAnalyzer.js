@@ -211,9 +211,13 @@ export async function analyzeCertificate({
       { role: 'system', content: buildSystemPrompt() },
       {
         role: 'user',
+        // WICHTIG: Bei Qwen2.5-VL / vLLM-Multimodal muss das Bild VOR dem Text
+        // im content-Array stehen, sonst rendert das Chat-Template keinen
+        // Image-Placeholder (<|image_pad|>) und vLLM antwortet mit
+        // "Failed to apply prompt replacement for mm_items['image'][0]".
         content: [
-          { type: 'text', text: buildUserPrompt({ qualificationName, qualificationDescription }) },
           { type: 'image_url', image_url: { url: dataUrl } },
+          { type: 'text', text: buildUserPrompt({ qualificationName, qualificationDescription }) },
         ],
       },
     ],
