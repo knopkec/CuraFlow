@@ -353,7 +353,6 @@ export default function DoctorForm({ open, onOpenChange, doctor, onSubmit }) {
                 doctorId={doctor?.id} 
                 selectedQualIds={selectedQualIds} 
                 onToggle={handleToggleQual} 
-                compact 
               />
           </div>
 

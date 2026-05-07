@@ -150,7 +150,7 @@ export default function DoctorQualificationEditor({ doctorId, selectedQualIds = 
         );
     }
 
-    // Full view: grouped by category with checkboxes
+    // Full view: kompakte 2-Spalten Chip-Grid pro Kategorie + Cert-Manager unter zugewiesenen pflichtigen
     return (
         <div className="space-y-3">
             <Label className="text-sm font-medium flex items-center gap-1.5">
@@ -160,63 +160,81 @@ export default function DoctorQualificationEditor({ doctorId, selectedQualIds = 
             {categories.map(cat => {
                 const catQuals = (qualificationsByCategory[cat] || []).filter(q => q.is_active !== false);
                 if (catQuals.length === 0) return null;
+                const certRequiredAssigned = doctorId
+                    ? catQuals.filter(q => q.requires_certificate === true && assignedQualIds.includes(q.id))
+                    : [];
                 return (
-                    <div key={cat} className="space-y-1">
-                        <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    <div key={cat} className="space-y-2">
+                        <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                             {cat}
                         </div>
-                        <div className="space-y-1">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                             {catQuals.map(qual => {
                                 const isAssigned = assignedQualIds.includes(qual.id);
-                                const dqEntry = doctorId ? doctorQuals.find(dq => dq.qualification_id === qual.id) : null;
-                                const showCertManager = !!doctorId && isAssigned && qual.requires_certificate === true;
+                                const requiresCert = qual.requires_certificate === true;
                                 return (
-                                    <React.Fragment key={qual.id}>
-                                        <div
-                                            className="flex items-center gap-2.5 py-1 px-2 rounded hover:bg-slate-50 cursor-pointer"
-                                            onClick={() => toggleHandler(qual.id)}
+                                    <button
+                                        key={qual.id}
+                                        type="button"
+                                        onClick={() => toggleHandler(qual.id)}
+                                        title={qual.description || qual.name}
+                                        className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md border text-left transition-all ${
+                                            isAssigned
+                                                ? 'border-indigo-300 bg-white shadow-sm'
+                                                : 'border-slate-200 bg-slate-50/60 hover:bg-white hover:border-slate-300 opacity-80'
+                                        }`}
+                                    >
+                                        <Checkbox
+                                            checked={isAssigned}
+                                            onCheckedChange={() => toggleHandler(qual.id)}
+                                            className="pointer-events-none shrink-0"
+                                        />
+                                        <Badge
+                                            style={{
+                                                backgroundColor: qual.color_bg || '#e0e7ff',
+                                                color: qual.color_text || '#3730a3',
+                                            }}
+                                            className="border-0 text-[10px] shrink-0"
                                         >
-                                            <Checkbox 
-                                                checked={isAssigned}
-                                                onCheckedChange={() => toggleHandler(qual.id)}
-                                                className="pointer-events-none"
+                                            {qual.short_label || qual.name.substring(0, 3).toUpperCase()}
+                                        </Badge>
+                                        <span className="text-xs font-medium text-slate-700 truncate flex-1">
+                                            {qual.name}
+                                        </span>
+                                        {requiresCert && (
+                                            <FileCheck
+                                                className="w-3.5 h-3.5 text-amber-600 shrink-0"
+                                                title="Zertifikat erforderlich"
                                             />
-                                            <Badge 
-                                                style={{ 
-                                                    backgroundColor: qual.color_bg || '#e0e7ff', 
-                                                    color: qual.color_text || '#3730a3' 
-                                                }}
-                                                className="border-0 text-xs"
-                                            >
-                                                {qual.short_label || qual.name.substring(0, 3).toUpperCase()}
-                                            </Badge>
-                                            <span className="text-sm">{qual.name}</span>
-                                            {qual.requires_certificate === true && (
-                                                <FileCheck className="w-3.5 h-3.5 text-amber-600" title="Zertifikat erforderlich" />
-                                            )}
-                                            {qual.description && (
-                                                <span className="text-xs text-slate-400 ml-auto hidden sm:block">
-                                                    {qual.description}
-                                                </span>
-                                            )}
-                                        </div>
-                                        {showCertManager && (
-                                            <div className="ml-7 my-2" onClick={(e) => e.stopPropagation()}>
-                                                <CertificateManager
-                                                    doctorId={doctorId}
-                                                    qualificationId={qual.id}
-                                                    qualificationName={qual.name}
-                                                    doctorQualificationId={dqEntry?.id || null}
-                                                />
-                                            </div>
                                         )}
-                                    </React.Fragment>
+                                    </button>
                                 );
                             })}
                         </div>
+                        {certRequiredAssigned.length > 0 && (
+                            <div className="space-y-2 pt-1">
+                                {certRequiredAssigned.map(qual => {
+                                    const dqEntry = doctorQuals.find(dq => dq.qualification_id === qual.id);
+                                    return (
+                                        <CertificateManager
+                                            key={qual.id}
+                                            doctorId={doctorId}
+                                            qualificationId={qual.id}
+                                            qualificationName={qual.name}
+                                            doctorQualificationId={dqEntry?.id || null}
+                                        />
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
                 );
             })}
+            {!doctorId && activeQuals.some(q => q.requires_certificate === true && assignedQualIds.includes(q.id)) && (
+                <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                    Hinweis: Zertifikate können erst nach dem Speichern des Teammitglieds hochgeladen werden.
+                </div>
+            )}
         </div>
     );
 }
