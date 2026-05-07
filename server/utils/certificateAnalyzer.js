@@ -9,9 +9,18 @@
  * Wenn eine der Variablen fehlt, ist die Analyse deaktiviert (Status 'skipped').
  */
 
+import sharp from 'sharp';
+
 const MAX_TOKENS = 32768; // Modell-Kontext-Limit (vLLM)
 const REQUEST_TIMEOUT_MS = 90_000; // 90s – große Bilder + lokales LLM
 const RESPONSE_MAX_TOKENS = 800;
+
+// Bild-Downscaling: Vision-Modelle (z.B. Qwen2.5-VL) erzeugen pro 28x28-Patch
+// einen Token. Ein 4000x3000-Foto produziert >15k Vision-Tokens und sprengt
+// schnell das 32k-Kontext-Limit. 1600px Längskante ist ein guter Kompromiss
+// zwischen Lesbarkeit kleiner Schrift und Token-Budget (~3000 Vision-Tokens).
+const TARGET_LONG_EDGE = 1600;
+const JPEG_QUALITY = 80;
 
 export function isAnalyzerConfigured() {
   return !!(process.env.LLM_VISION_BASE_URL && process.env.LLM_VISION_MODEL);
@@ -52,6 +61,39 @@ function buildUserPrompt({ qualificationName, qualificationDescription }) {
 function bufferToDataUrl(buffer, mimeType) {
   const base64 = Buffer.isBuffer(buffer) ? buffer.toString('base64') : Buffer.from(buffer).toString('base64');
   return `data:${mimeType};base64,${base64}`;
+}
+
+/**
+ * Skaliert große Bilder herunter, damit sie das Vision-Token-Budget nicht
+ * sprengen. Bilder, deren Längskante bereits klein genug ist, werden
+ * unverändert zurückgegeben (kein Re-Encoding).
+ */
+async function downscaleForVision(buffer, mimeType) {
+  if (!mimeType?.startsWith('image/')) {
+    return { buffer, mimeType };
+  }
+  try {
+    const image = sharp(buffer, { failOn: 'none' });
+    const meta = await image.metadata();
+    const longEdge = Math.max(meta.width || 0, meta.height || 0);
+    if (!longEdge || longEdge <= TARGET_LONG_EDGE) {
+      return { buffer, mimeType };
+    }
+    const resized = await image
+      .rotate() // EXIF-Orientierung anwenden
+      .resize({
+        width: meta.width >= meta.height ? TARGET_LONG_EDGE : null,
+        height: meta.height > meta.width ? TARGET_LONG_EDGE : null,
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+      .jpeg({ quality: JPEG_QUALITY, mozjpeg: true })
+      .toBuffer();
+    return { buffer: resized, mimeType: 'image/jpeg' };
+  } catch (err) {
+    console.warn('[certificateAnalyzer] Downscale fehlgeschlagen, sende Original:', err.message);
+    return { buffer, mimeType };
+  }
 }
 
 function tryParseJson(text) {
@@ -149,7 +191,8 @@ export async function analyzeCertificate({
 
   const baseUrl = process.env.LLM_VISION_BASE_URL.replace(/\/$/, '');
   const model = process.env.LLM_VISION_MODEL;
-  const dataUrl = bufferToDataUrl(buffer, mimeType);
+  const { buffer: visionBuffer, mimeType: visionMime } = await downscaleForVision(buffer, mimeType);
+  const dataUrl = bufferToDataUrl(visionBuffer, visionMime);
 
   const body = {
     model,
