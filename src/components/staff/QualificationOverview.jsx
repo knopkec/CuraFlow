@@ -1,10 +1,14 @@
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useCallback, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { db } from '@/api/client';
+import { db, api } from '@/api/client';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Award, User, Check, X, Shield } from 'lucide-react';
+import { Award, User, Check, X, Shield, AlertTriangle, FileCheck } from 'lucide-react';
 import { useQualifications, useAllDoctorQualifications } from '@/hooks/useQualifications';
+import {
+    AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 /**
  * Interaktive Übersichts-Matrix: Welcher Mitarbeiter hat welche Qualifikation.
@@ -14,6 +18,23 @@ export default function QualificationOverview({ doctors = [], isReadOnly = false
     const queryClient = useQueryClient();
     const { qualifications, qualificationMap, isLoading: qualsLoading } = useQualifications();
     const { allDoctorQualifications, byDoctor, isLoading: dqLoading } = useAllDoctorQualifications();
+
+    // Load all certificates (admins get all in tenant; non-admins only their own)
+    // to detect doctor+qualification combos missing a required certificate.
+    const { data: allCertificates = [], isLoading: certsLoading } = useQuery({
+        queryKey: ['certificates', { doctorId: null, qualificationId: null }],
+        queryFn: () => api.listCertificates(),
+    });
+    const certKeySet = useMemo(() => {
+        const set = new Set();
+        for (const c of allCertificates) {
+            set.add(`${c.doctor_id}:${c.qualification_id}`);
+        }
+        return set;
+    }, [allCertificates]);
+
+    // Confirmation dialog state when assigning a cert-required qualification
+    const [pendingAssign, setPendingAssign] = useState(null); // { doctorId, qual }
 
     const assignMutation = useMutation({
         mutationFn: (data) => db.DoctorQualification.create(data),
@@ -37,13 +58,28 @@ export default function QualificationOverview({ doctors = [], isReadOnly = false
         const existing = doctorEntries.find(dq => dq.qualification_id === qualId);
         if (existing) {
             removeMutation.mutate(existing.id);
-        } else {
-            assignMutation.mutate({ doctor_id: doctorId, qualification_id: qualId });
+            return;
         }
-    }, [byDoctor, isReadOnly, assignMutation, removeMutation]);
+        const qual = qualificationMap?.[qualId];
+        if (qual?.requires_certificate) {
+            // Defer the actual assignment until the user confirms.
+            setPendingAssign({ doctorId, qual });
+            return;
+        }
+        assignMutation.mutate({ doctor_id: doctorId, qualification_id: qualId });
+    }, [byDoctor, isReadOnly, assignMutation, removeMutation, qualificationMap]);
+
+    const confirmAssign = () => {
+        if (!pendingAssign) return;
+        assignMutation.mutate({
+            doctor_id: pendingAssign.doctorId,
+            qualification_id: pendingAssign.qual.id,
+        });
+        setPendingAssign(null);
+    };
 
     const activeQuals = qualifications.filter(q => q.is_active !== false);
-    const isLoading = qualsLoading || dqLoading;
+    const isLoading = qualsLoading || dqLoading || certsLoading;
 
     if (isLoading) {
         return (
@@ -126,17 +162,32 @@ export default function QualificationOverview({ doctors = [], isReadOnly = false
                                         {activeQuals.map(qual => {
                                             const hasQual = doctorQualIds.includes(qual.id);
                                             const isPending = assignMutation.isPending || removeMutation.isPending;
+                                            const requiresCert = qual.requires_certificate === true;
+                                            const hasCert = certKeySet.has(`${doctor.id}:${qual.id}`);
+                                            const missingCert = hasQual && requiresCert && !hasCert;
+                                            const tooltip = !isReadOnly
+                                                ? (missingCert
+                                                    ? `${qual.name}: kein Zertifikat hinterlegt – bitte im Mitarbeiter-Profil hochladen`
+                                                    : (hasQual ? `${qual.name} entfernen` : `${qual.name} zuweisen`))
+                                                : (missingCert ? `${qual.name}: kein Zertifikat hinterlegt` : '');
                                             return (
                                                 <td 
                                                     key={qual.id} 
                                                     className={`text-center py-2 px-2 ${
                                                         !isReadOnly ? 'cursor-pointer hover:bg-slate-100 transition-colors' : ''
-                                                    }`}
+                                                    } ${missingCert ? 'bg-amber-50/60' : ''}`}
                                                     onClick={() => !isPending && handleToggle(doctor.id, qual.id)}
-                                                    title={!isReadOnly ? (hasQual ? `${qual.name} entfernen` : `${qual.name} zuweisen`) : ''}
+                                                    title={tooltip}
                                                 >
                                                     {hasQual ? (
-                                                        <Check className="w-4 h-4 text-green-600 mx-auto" />
+                                                        missingCert ? (
+                                                            <span className="inline-flex items-center justify-center gap-0.5" aria-label="Zertifikat fehlt">
+                                                                <Check className="w-4 h-4 text-green-600" />
+                                                                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                                                            </span>
+                                                        ) : (
+                                                            <Check className="w-4 h-4 text-green-600 mx-auto" />
+                                                        )
                                                     ) : (
                                                         <span className={`inline-block w-4 h-4 mx-auto rounded border ${
                                                             !isReadOnly ? 'border-slate-300 hover:border-indigo-400' : 'border-transparent'
@@ -173,6 +224,47 @@ export default function QualificationOverview({ doctors = [], isReadOnly = false
                     </table>
                 </div>
             </CardContent>
+
+            {/* Hinweis-Dialog beim Zuweisen einer zertifikatpflichtigen Qualifikation */}
+            <AlertDialog open={!!pendingAssign} onOpenChange={(open) => { if (!open) setPendingAssign(null); }}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle className="flex items-center gap-2 text-amber-800">
+                            <FileCheck className="w-5 h-5" />
+                            Zertifikat-Upload erforderlich
+                        </AlertDialogTitle>
+                        <AlertDialogDescription asChild>
+                            <div className="space-y-2 text-sm text-slate-600">
+                                <p>
+                                    Für die Qualifikation <strong>{pendingAssign?.qual?.name}</strong> ist ein
+                                    Nachweis (PDF, JPEG oder PNG, max. 5 MB) erforderlich.
+                                </p>
+                                <p>
+                                    Nach dem Bestätigen wird die Qualifikation zugewiesen.
+                                    Bitte laden Sie das Zertifikat anschließend hoch:
+                                </p>
+                                <ol className="list-decimal list-inside space-y-1 text-xs bg-slate-50 p-3 rounded">
+                                    <li>Mitarbeiter öffnen (Stift-Symbol in der Liste).</li>
+                                    <li>Im Bereich <em>Qualifikationen &amp; Berechtigungen</em> erscheint unter
+                                        „{pendingAssign?.qual?.name}“ ein gelbes Upload-Feld.</li>
+                                    <li>Datei auswählen, optional Ausstellungs- und Ablaufdatum eintragen,
+                                        dann <em>Hochladen</em>.</li>
+                                </ol>
+                                <p className="text-xs text-amber-700">
+                                    Solange kein Zertifikat hinterlegt ist, wird die Qualifikation in dieser
+                                    Matrix mit einem Warn-Symbol markiert.
+                                </p>
+                            </div>
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Abbrechen</AlertDialogCancel>
+                        <AlertDialogAction onClick={confirmAssign} className="bg-amber-600 hover:bg-amber-700">
+                            Verstanden, jetzt zuweisen
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </Card>
     );
 }
