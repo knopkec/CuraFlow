@@ -99,7 +99,7 @@ export default function QualificationOverview({ doctors = [], isReadOnly = false
         setPendingAssign(null);
     };
 
-    const activeQuals = qualifications.filter(q => q.is_active !== false);
+    const activeQuals = useMemo(() => qualifications.filter(q => q.is_active !== false), [qualifications]);
     const isLoading = qualsLoading || dqLoading || certsLoading;
 
     const reminderCandidates = useMemo(() => {
