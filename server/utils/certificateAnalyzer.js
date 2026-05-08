@@ -40,6 +40,10 @@ const RESPONSE_MAX_TOKENS = 800;
 const OCR_TARGET_LONG_EDGE = 2000;
 const OCR_LANGUAGES = ['deu', 'eng'];
 const PDF_RENDER_DPI = 200;
+const OCR_ROTATION_FALLBACK_ANGLES = [0, 90, 270, 180];
+const OCR_DESKEW_FALLBACK_OFFSETS = [-12, -8, -4, 4, 8, 12];
+const OCR_MIN_CONFIDENCE_FOR_SINGLE_PASS = 45;
+const OCR_MIN_TEXT_LENGTH_FOR_SINGLE_PASS = 80;
 
 // Auf wie viele Zeichen wir den OCR-Text vor dem LLM-Call trimmen.
 // Zertifikate haben selten mehr als 2-3 KB Text; das hält die Prompt-Größe
@@ -156,6 +160,10 @@ async function prepareFileForOcr(buffer, mimeType) {
  * Graustufen + Normalize für besseren Kontrast.
  */
 async function preprocessForOcr(buffer, mimeType) {
+  return preprocessForOcrAngle(buffer, mimeType, 0);
+}
+
+async function preprocessForOcrAngle(buffer, mimeType, rotationAngle = 0) {
   if (!mimeType?.startsWith('image/')) {
     return buffer;
   }
@@ -172,6 +180,11 @@ async function preprocessForOcr(buffer, mimeType) {
         withoutEnlargement: true,
       });
     }
+
+    if (rotationAngle) {
+      pipeline = pipeline.rotate(rotationAngle, { background: '#ffffff' });
+    }
+
     return await pipeline
       .grayscale()
       .normalize()
@@ -187,16 +200,92 @@ async function runOcr(buffer, mimeType) {
   const prepped = await preprocessForOcr(buffer, mimeType);
   const worker = await getOcrWorker();
   const { data } = await worker.recognize(prepped);
-  const text = (data?.text || '')
-    .replace(/\f/g, '\n')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  const text = normalizeOcrText(data?.text || '');
   return {
     text: text.slice(0, MAX_OCR_CHARS),
     confidence: typeof data?.confidence === 'number' ? data.confidence : null,
     truncated: text.length > MAX_OCR_CHARS,
     fullLength: text.length,
+    angle: 0,
+  };
+}
+
+function normalizeOcrText(text) {
+  return String(text || '')
+    .replace(/\f/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function scoreOcrResult(result) {
+  const confidence = typeof result?.confidence === 'number' ? result.confidence : 0;
+  const textLength = result?.fullLength || result?.text?.length || 0;
+  return (confidence * 20) + Math.min(textLength, 4000);
+}
+
+function shouldTryRotatedOcr(result) {
+  if (!result) return true;
+  const confidence = typeof result.confidence === 'number' ? result.confidence : 0;
+  const textLength = result.fullLength || result.text?.length || 0;
+  return confidence < OCR_MIN_CONFIDENCE_FOR_SINGLE_PASS || textLength < OCR_MIN_TEXT_LENGTH_FOR_SINGLE_PASS;
+}
+
+function buildDeskewAngles(baseAngle) {
+  return OCR_DESKEW_FALLBACK_OFFSETS.map((offset) => baseAngle + offset);
+}
+
+async function recognizeOcrCandidate(worker, buffer, mimeType, angle) {
+  const prepped = angle === 0
+    ? await preprocessForOcr(buffer, mimeType)
+    : await preprocessForOcrAngle(buffer, mimeType, angle);
+  const { data } = await worker.recognize(prepped);
+  const text = normalizeOcrText(data?.text || '');
+
+  return {
+    text: text.slice(0, MAX_OCR_CHARS),
+    confidence: typeof data?.confidence === 'number' ? data.confidence : null,
+    truncated: text.length > MAX_OCR_CHARS,
+    fullLength: text.length,
+    angle,
+  };
+}
+
+async function runOcrWithRotationFallback(buffer, mimeType) {
+  const worker = await getOcrWorker();
+  const attemptedAngles = [];
+  let bestResult = null;
+
+  for (const angle of OCR_ROTATION_FALLBACK_ANGLES) {
+    const candidate = await recognizeOcrCandidate(worker, buffer, mimeType, angle);
+    attemptedAngles.push({ angle, confidence: candidate.confidence, chars: candidate.fullLength });
+
+    if (!bestResult || scoreOcrResult(candidate) > scoreOcrResult(bestResult)) {
+      bestResult = candidate;
+    }
+
+    if (angle === 0 && !shouldTryRotatedOcr(candidate)) {
+      return {
+        ...candidate,
+        attemptedAngles,
+      };
+    }
+  }
+
+  if (bestResult && shouldTryRotatedOcr(bestResult)) {
+    for (const angle of buildDeskewAngles(bestResult.angle || 0)) {
+      const candidate = await recognizeOcrCandidate(worker, buffer, mimeType, angle);
+      attemptedAngles.push({ angle, confidence: candidate.confidence, chars: candidate.fullLength });
+
+      if (scoreOcrResult(candidate) > scoreOcrResult(bestResult)) {
+        bestResult = candidate;
+      }
+    }
+  }
+
+  return {
+    ...bestResult,
+    attemptedAngles,
   };
 }
 
@@ -285,7 +374,7 @@ export async function analyzeCertificate({
   const ocrStartedAt = Date.now();
   try {
     ocrInput = await prepareFileForOcr(buffer, mimeType);
-    ocrResult = await runOcr(ocrInput.buffer, ocrInput.mimeType);
+    ocrResult = await runOcrWithRotationFallback(ocrInput.buffer, ocrInput.mimeType);
   } catch (err) {
     const errMsg = `OCR fehlgeschlagen: ${err.message || err}`;
     console.error('[certificateAnalyzer] OCR-Fehler', { name: err.name, message: err.message });
@@ -310,6 +399,8 @@ export async function analyzeCertificate({
     fullChars: ocrResult.fullLength,
     truncated: ocrResult.truncated,
     ocrConfidence: ocrResult.confidence,
+    ocrAngle: ocrResult.angle,
+    attemptedAngles: ocrResult.attemptedAngles,
   });
 
   if (!ocrResult.text || ocrResult.text.length < 10) {
