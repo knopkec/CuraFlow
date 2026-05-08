@@ -289,6 +289,23 @@ function formatReminderStatusLabel({ hasCertificates, summary, validUntil }) {
   return 'Nachweis ungueltig';
 }
 
+function toIsoDateOnly(value) {
+  if (!value) return null;
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
+}
+
+function diffIsoDaysFromToday(value) {
+  const iso = toIsoDateOnly(value);
+  if (!iso) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const targetMs = Date.parse(`${iso}T00:00:00.000Z`);
+  const todayMs = Date.parse(`${today}T00:00:00.000Z`);
+  return Math.round((targetMs - todayMs) / 86400000);
+}
+
 async function getReminderRecipientsForDoctor(doctorId) {
   const [rows] = await db.execute(
     `SELECT id, email, full_name, doctor_id
@@ -693,12 +710,8 @@ router.get('/expiring', async (req, res, next) => {
     const requested = parseInt(req.query.days, 10);
     const days = Math.min(Math.max(Number.isFinite(requested) ? requested : 60, 1), 365);
 
-    const conditions = [
-      'tenant_key = ?',
-      'expiry_date IS NOT NULL',
-      'expiry_date <= DATE_ADD(CURDATE(), INTERVAL ? DAY)',
-    ];
-    const params = [tenantKey, days];
+    const conditions = ['tenant_key = ?'];
+    const params = [tenantKey];
 
     if (req.user?.role !== 'admin') {
       if (!req.user?.doctor_id) return res.json([]);
@@ -706,17 +719,88 @@ router.get('/expiring', async (req, res, next) => {
       params.push(req.user.doctor_id);
     }
 
-    const [rows] = await db.execute(
-      `SELECT id, doctor_id, qualification_id, file_name,
-              granted_date, expiry_date, uploaded_at,
-              DATEDIFF(expiry_date, CURDATE()) AS days_until_expiry
+    const [certificates] = await db.execute(
+      `SELECT id, doctor_id, qualification_id, doctor_qualification_id,
+              evidence_role, file_name, granted_date, expiry_date, uploaded_at
          FROM QualificationCertificate
         WHERE ${conditions.join(' AND ')}
-        ORDER BY expiry_date ASC`,
+        ORDER BY doctor_id ASC, qualification_id ASC, uploaded_at ASC`,
       params
     );
 
-    res.json(rows);
+    if (!certificates.length) {
+      return res.json([]);
+    }
+
+    const qualificationIds = Array.from(new Set(certificates.map((certificate) => certificate.qualification_id).filter(Boolean)));
+    if (!qualificationIds.length) {
+      return res.json([]);
+    }
+
+    const placeholders = qualificationIds.map(() => '?').join(', ');
+    const [qualificationRows] = await req.db.execute(
+      `SELECT id, name, description, requires_certificate,
+              certificate_requirement_mode, certificate_validity_months,
+              certificate_refresh_validity_months, certificate_base_label,
+              certificate_refresh_label
+         FROM Qualification
+        WHERE id IN (${placeholders})`,
+      qualificationIds
+    );
+    const qualificationById = new Map(qualificationRows.map((qualification) => [qualification.id, qualification]));
+    const certificateById = new Map(certificates.map((certificate) => [certificate.id, certificate]));
+
+    const grouped = new Map();
+    for (const certificate of certificates) {
+      const key = `${certificate.doctor_id}::${certificate.qualification_id}`;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(certificate);
+    }
+
+    const rows = [];
+    for (const groupCertificates of grouped.values()) {
+      const firstCertificate = groupCertificates[0];
+      const qualification = qualificationById.get(firstCertificate.qualification_id);
+      if (!qualification || (qualification.requires_certificate !== 1 && qualification.requires_certificate !== true)) {
+        continue;
+      }
+
+      const summary = computeQualificationEvidenceSummary({
+        qualification,
+        certificates: groupCertificates,
+      });
+      const validUntil = toIsoDateOnly(summary.valid_until);
+      const daysUntilExpiry = diffIsoDaysFromToday(validUntil);
+      if (!Number.isFinite(daysUntilExpiry) || daysUntilExpiry > days) {
+        continue;
+      }
+
+      const activeIds = Array.isArray(summary.active_certificate_ids) ? summary.active_certificate_ids : [];
+      const representativeCertificate = certificateById.get(activeIds[activeIds.length - 1]) || groupCertificates[groupCertificates.length - 1];
+      rows.push({
+        id: representativeCertificate.id,
+        doctor_id: firstCertificate.doctor_id,
+        qualification_id: firstCertificate.qualification_id,
+        doctor_qualification_id: representativeCertificate.doctor_qualification_id || null,
+        evidence_role: representativeCertificate.evidence_role,
+        file_name: representativeCertificate.file_name,
+        granted_date: representativeCertificate.granted_date,
+        expiry_date: validUntil,
+        uploaded_at: representativeCertificate.uploaded_at,
+        days_until_expiry: daysUntilExpiry,
+        certificate_status: summary.status,
+        certificate_status_reason: summary.reason,
+      });
+    }
+
+    rows.sort((left, right) => {
+      if (left.days_until_expiry !== right.days_until_expiry) {
+        return left.days_until_expiry - right.days_until_expiry;
+      }
+      return String(left.qualification_id).localeCompare(String(right.qualification_id));
+    });
+
+    return res.json(rows);
   } catch (err) {
     next(err);
   }
