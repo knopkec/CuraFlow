@@ -44,6 +44,7 @@ const OCR_ROTATION_FALLBACK_ANGLES = [0, 90, 270, 180];
 const OCR_DESKEW_FALLBACK_OFFSETS = [-12, -8, -4, 4, 8, 12];
 const OCR_MIN_CONFIDENCE_FOR_SINGLE_PASS = 45;
 const OCR_MIN_TEXT_LENGTH_FOR_SINGLE_PASS = 80;
+const PDF_TEXT_MIN_LENGTH = 80;
 
 // Auf wie viele Zeichen wir den OCR-Text vor dem LLM-Call trimmen.
 // Zertifikate haben selten mehr als 2-3 KB Text; das hält die Prompt-Größe
@@ -133,6 +134,32 @@ async function renderPdfFirstPageToPng(buffer) {
       throw new Error('PDF-Prüfung nicht verfügbar: pdftoppm fehlt im Server-Image');
     }
     throw new Error(`PDF-Konvertierung fehlgeschlagen: ${err.stderr?.slice(0, 300) || err.message || err}`);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function extractPdfFirstPageText(buffer) {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'curaflow-pdf-text-'));
+  const inputPath = path.join(tempDir, 'document.pdf');
+
+  try {
+    await fs.writeFile(inputPath, buffer);
+    const { stdout } = await execFileAsync('pdftotext', [
+      '-f', '1',
+      '-l', '1',
+      '-layout',
+      inputPath,
+      '-',
+    ]);
+    return normalizeOcrText(stdout || '');
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      console.warn('[certificateAnalyzer] pdftotext fehlt im Server-Image, falle auf OCR zurück');
+      return '';
+    }
+    console.warn('[certificateAnalyzer] PDF-Text konnte nicht direkt extrahiert werden, falle auf OCR zurück:', err.message);
+    return '';
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
   }
@@ -373,8 +400,43 @@ export async function analyzeCertificate({
   let ocrInput;
   const ocrStartedAt = Date.now();
   try {
-    ocrInput = await prepareFileForOcr(buffer, mimeType);
-    ocrResult = await runOcrWithRotationFallback(ocrInput.buffer, ocrInput.mimeType);
+    const directPdfText = mimeType === 'application/pdf'
+      ? await extractPdfFirstPageText(buffer)
+      : '';
+
+    if (directPdfText.length >= PDF_TEXT_MIN_LENGTH) {
+      ocrResult = {
+        text: directPdfText.slice(0, MAX_OCR_CHARS),
+        confidence: 100,
+        truncated: directPdfText.length > MAX_OCR_CHARS,
+        fullLength: directPdfText.length,
+        angle: 0,
+        attemptedAngles: [{ angle: 0, confidence: 100, chars: directPdfText.length }],
+        extractionMode: 'pdf-text',
+      };
+    } else {
+      ocrInput = await prepareFileForOcr(buffer, mimeType);
+      ocrResult = await runOcrWithRotationFallback(ocrInput.buffer, ocrInput.mimeType);
+      ocrResult = {
+        ...ocrResult,
+        extractionMode: directPdfText.length > 0 ? 'pdf-ocr-fallback' : 'ocr',
+      };
+
+      if (directPdfText.length > 0 && directPdfText.length > ocrResult.fullLength) {
+        ocrResult = {
+          text: directPdfText.slice(0, MAX_OCR_CHARS),
+          confidence: Math.max(ocrResult.confidence || 0, 100),
+          truncated: directPdfText.length > MAX_OCR_CHARS,
+          fullLength: directPdfText.length,
+          angle: 0,
+          attemptedAngles: [
+            ...(ocrResult.attemptedAngles || []),
+            { angle: 0, confidence: 100, chars: directPdfText.length, mode: 'pdf-text' },
+          ],
+          extractionMode: 'pdf-text-preferred',
+        };
+      }
+    }
   } catch (err) {
     const errMsg = `OCR fehlgeschlagen: ${err.message || err}`;
     console.error('[certificateAnalyzer] OCR-Fehler', { name: err.name, message: err.message });
@@ -395,6 +457,7 @@ export async function analyzeCertificate({
   console.info('[certificateAnalyzer] OCR fertig', {
     durationMs: Date.now() - ocrStartedAt,
     sourceType: ocrInput?.sourceType,
+    extractionMode: ocrResult.extractionMode,
     chars: ocrResult.text.length,
     fullChars: ocrResult.fullLength,
     truncated: ocrResult.truncated,
