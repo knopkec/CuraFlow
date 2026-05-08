@@ -16,13 +16,6 @@ function addMonthsIso(value, months) {
   return date.toISOString().slice(0, 10);
 }
 
-function endOfYearIso(value) {
-  if (!value) return null;
-  const [year] = value.split('-').map(Number);
-  if (!year) return null;
-  return `${String(year).padStart(4, '0')}-12-31`;
-}
-
 function compareIsoDate(a, b) {
   if (!a && !b) return 0;
   if (!a) return -1;
@@ -41,23 +34,6 @@ function deriveEffectiveUntil(certificate, validityMonths = null) {
   if (from && Number.isFinite(validityMonths) && validityMonths > 0) {
     return addMonthsIso(from, validityMonths);
   }
-  return null;
-}
-
-function getRenewalBlockEnd({ baseFrom, validityMonths, refreshFrom }) {
-  if (!baseFrom || !refreshFrom || !Number.isFinite(validityMonths) || validityMonths <= 0) {
-    return null;
-  }
-
-  for (let blockIndex = 1; blockIndex <= 50; blockIndex += 1) {
-    const blockEnd = addMonthsIso(baseFrom, validityMonths * blockIndex);
-    if (!blockEnd) return null;
-    const blockGraceEnd = endOfYearIso(blockEnd);
-    if (compareIsoDate(refreshFrom, blockGraceEnd) <= 0) {
-      return blockEnd;
-    }
-  }
-
   return null;
 }
 
@@ -188,17 +164,8 @@ function buildBaseRefreshSummary({ qualification, certificates, today }) {
         continue;
       }
 
-      const renewalBlockEnd = getRenewalBlockEnd({
-        baseFrom,
-        validityMonths: baseValidityMonths,
-        refreshFrom,
-      });
-      if (!renewalBlockEnd) {
-        continue;
-      }
-
-      const refreshUntil = addMonthsIso(
-        renewalBlockEnd,
+      const refreshUntil = deriveEffectiveUntil(
+        refreshCertificate,
         Number.isFinite(refreshValidityMonths) ? refreshValidityMonths : baseValidityMonths
       );
       if (refreshUntil && (!validUntil || compareIsoDate(refreshUntil, validUntil) > 0)) {
@@ -239,8 +206,8 @@ function buildBaseRefreshSummary({ qualification, certificates, today }) {
     reason: expired
       ? `Nachweiskette abgelaufen am ${winner.valid_until || 'unbekannt'}.`
       : (winner.valid_until
-          ? `Grundnachweis vorhanden${usedRefreshes ? `, ${usedRefreshes} Verlängerungsnachweis(e) im Fachkunde-Block berücksichtigt` : ''}. Gültig bis ${winner.valid_until}.`
-          : `Grundnachweis vorhanden${usedRefreshes ? `, ${usedRefreshes} Verlängerungsnachweis(e) im Fachkunde-Block berücksichtigt` : ''}.`),
+          ? `Grundnachweis vorhanden${usedRefreshes ? `, ${usedRefreshes} Verlängerungsnachweis(e) berücksichtigt` : ''}. Gültig bis ${winner.valid_until}.`
+          : `Grundnachweis vorhanden${usedRefreshes ? `, ${usedRefreshes} Verlängerungsnachweis(e) berücksichtigt` : ''}.`),
     missing_roles: [],
     active_certificate_ids: winner.active_certificate_ids,
     certificate_valid_until_by_id: propagatedValidUntilById,
