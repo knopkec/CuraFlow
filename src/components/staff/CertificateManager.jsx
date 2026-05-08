@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { format, differenceInCalendarDays, isValid, parseISO } from 'date-fns';
 import { de } from 'date-fns/locale';
 import {
@@ -201,7 +201,9 @@ export default function CertificateManager({
     const { toast } = useToast();
     const fileInputRef = useRef(null);
     const checkRequestRef = useRef(0);
+    const dragDepthRef = useRef(0);
     const [pendingFile, setPendingFile] = useState(null);
+    const [isDragActive, setIsDragActive] = useState(false);
     const [pendingEvidenceRole, setPendingEvidenceRole] = useState(
         requirementMode === 'base_refresh' ? 'base' : 'single'
     );
@@ -307,17 +309,14 @@ export default function CertificateManager({
         expiryDate,
     ]);
 
-    const handleFileChange = async (e) => {
-        const file = e.target.files?.[0];
+    const processSelectedFile = async (file) => {
         if (!file) return;
         if (!ALLOWED_TYPES.includes(file.type)) {
             toast({ variant: 'destructive', title: 'Dateityp nicht erlaubt', description: 'Erlaubt: PDF, JPEG, PNG.' });
-            e.target.value = '';
             return;
         }
         if (file.size > MAX_SIZE) {
             toast({ variant: 'destructive', title: 'Datei zu groß', description: 'Maximal 5 MB.' });
-            e.target.value = '';
             return;
         }
 
@@ -374,8 +373,60 @@ export default function CertificateManager({
         }
     };
 
+    const handleFileChange = async (e) => {
+        const file = e.target.files?.[0];
+        await processSelectedFile(file);
+        e.target.value = '';
+    };
+
+    const handleDragEnter = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dragDepthRef.current += 1;
+        setIsDragActive(true);
+    };
+
+    const handleDragOver = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'copy';
+        if (!isDragActive) setIsDragActive(true);
+    };
+
+    const handleDragLeave = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+        if (dragDepthRef.current === 0) {
+            setIsDragActive(false);
+        }
+    };
+
+    const handleDrop = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dragDepthRef.current = 0;
+        setIsDragActive(false);
+        const file = e.dataTransfer.files?.[0];
+        await processSelectedFile(file);
+    };
+
+    const handlePaste = async (e) => {
+        const items = Array.from(e.clipboardData?.items || []);
+        const pastedImage = items.find((item) => item.kind === 'file' && item.type.startsWith('image/'));
+        if (!pastedImage) return;
+
+        const file = pastedImage.getAsFile();
+        if (!file) return;
+
+        e.preventDefault();
+        await processSelectedFile(file);
+    };
+
     const resetUploadForm = () => {
         setPendingFile(null);
+        dragDepthRef.current = 0;
+        setIsDragActive(false);
         setPendingEvidenceRole(requirementMode === 'base_refresh' ? 'base' : 'single');
         setGrantedDate('');
         setExpiryDate('');
@@ -749,15 +800,53 @@ export default function CertificateManager({
             {canEdit && (
                 <div className="border-t pt-3 space-y-2">
                     <div className="text-xs font-semibold text-slate-600">Neues Zertifikat hochladen</div>
-                    <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="application/pdf,image/jpeg,image/png"
-                        onChange={handleFileChange}
-                        className="block w-full text-xs file:mr-3 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:bg-amber-100 file:text-amber-700 hover:file:bg-amber-200"
-                    />
+                    <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => fileInputRef.current?.click()}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                fileInputRef.current?.click();
+                            }
+                        }}
+                        onDragEnter={handleDragEnter}
+                        onDragOver={handleDragOver}
+                        onDragLeave={handleDragLeave}
+                        onDrop={handleDrop}
+                        onPaste={handlePaste}
+                        className={`rounded-md border border-dashed px-4 py-4 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-amber-400 focus:ring-offset-2 ${
+                            isDragActive
+                                ? 'border-amber-400 bg-amber-100/80'
+                                : 'border-amber-300 bg-amber-50/40 hover:bg-amber-50'
+                        }`}
+                        aria-label="Zertifikat per Datei auswählen, Drag-and-Drop oder Einfügen hochladen"
+                    >
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="application/pdf,image/jpeg,image/png"
+                            onChange={handleFileChange}
+                            className="sr-only"
+                        />
+                        <div className="flex flex-col gap-1 text-xs text-slate-600 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                            <div>
+                                <div className="font-medium text-slate-700">Datei auswählen, hierher ziehen oder Bild einfügen</div>
+                                <div>Erlaubt: PDF, JPEG, PNG bis 5 MB. Für Einfügen aus der Zwischenablage erst diese Fläche anklicken und dann einfügen.</div>
+                            </div>
+                            <Button type="button" size="sm" variant="outline" className="w-full sm:w-auto" onClick={(e) => {
+                                e.stopPropagation();
+                                fileInputRef.current?.click();
+                            }}>
+                                Datei wählen
+                            </Button>
+                        </div>
+                    </div>
                     {pendingFile && (
                         <div className="grid gap-2 sm:grid-cols-2">
+                            <div className="sm:col-span-2 text-xs text-slate-600 rounded-md border bg-white/70 px-3 py-2">
+                                Ausgewählte Datei: <span className="font-medium text-slate-800">{pendingFile.name}</span>
+                            </div>
                             <div className="sm:col-span-2">
                                 <UploadCheckNotice checkResult={checkResult} isChecking={isChecking} />
                             </div>
