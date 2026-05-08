@@ -446,7 +446,7 @@ export default function StaffPage() {
               )}
           </TabsContent>
 
-          <TabsContent value="qualifications" className="h-[calc(100vh-12rem)] overflow-y-auto">
+          <TabsContent value="qualifications" className="h-[calc(100vh-10rem)] overflow-y-auto">
               <QualificationOverview doctors={doctors} isReadOnly={isReadOnly} />
           </TabsContent>
 
