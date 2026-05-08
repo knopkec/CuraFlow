@@ -1,11 +1,9 @@
-import React from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/api/client';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Award, Check, X, FileCheck } from 'lucide-react';
+import { Award, Check, FileCheck } from 'lucide-react';
 import { useQualifications } from '@/hooks/useQualifications';
 import CertificateManager from '@/components/staff/CertificateManager';
 
@@ -67,6 +65,9 @@ export default function DoctorQualificationEditor({ doctorId, selectedQualIds = 
 
     // Determine assigned IDs: from server if doctor exists, otherwise from controlled props
     const assignedQualIds = doctorId ? doctorQuals.map(dq => dq.qualification_id) : selectedQualIds;
+    const assignedCertificateQualifications = doctorId
+        ? activeQuals.filter(q => q.requires_certificate === true && assignedQualIds.includes(q.id))
+        : [];
     const toggleHandler = doctorId
         ? (qualId) => {
             const existingAssignment = doctorQuals.find(dq => dq.qualification_id === qualId);
@@ -88,9 +89,6 @@ export default function DoctorQualificationEditor({ doctorId, selectedQualIds = 
 
     if (compact) {
         // Compact: Badge-Chips zum Anklicken + Upload-Bereich für zertifikatpflichtige Qualifikationen
-        const certRequiredAssigned = doctorId
-            ? activeQuals.filter(q => q.requires_certificate === true && assignedQualIds.includes(q.id))
-            : [];
         return (
             <div className="space-y-2">
                 <Label className="text-sm font-medium flex items-center gap-1.5">
@@ -124,9 +122,12 @@ export default function DoctorQualificationEditor({ doctorId, selectedQualIds = 
                         );
                     })}
                 </div>
-                {certRequiredAssigned.length > 0 && (
+                {assignedCertificateQualifications.length > 0 && (
                     <div className="space-y-2 pt-2">
-                        {certRequiredAssigned.map(qual => {
+                        <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                            Zertifikate
+                        </div>
+                        {assignedCertificateQualifications.map(qual => {
                             const dqEntry = doctorQuals.find(dq => dq.qualification_id === qual.id);
                             return (
                                 <CertificateManager
@@ -167,9 +168,6 @@ export default function DoctorQualificationEditor({ doctorId, selectedQualIds = 
             {categories.map(cat => {
                 const catQuals = (qualificationsByCategory[cat] || []).filter(q => q.is_active !== false);
                 if (catQuals.length === 0) return null;
-                const certRequiredAssigned = doctorId
-                    ? catQuals.filter(q => q.requires_certificate === true && assignedQualIds.includes(q.id))
-                    : [];
                 return (
                     <div key={cat} className="space-y-2">
                         <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
@@ -218,32 +216,32 @@ export default function DoctorQualificationEditor({ doctorId, selectedQualIds = 
                                 );
                             })}
                         </div>
-                        {certRequiredAssigned.length > 0 && (
-                            <div className="space-y-2 pt-1">
-                                {certRequiredAssigned.map(qual => {
-                                    const dqEntry = doctorQuals.find(dq => dq.qualification_id === qual.id);
-                                    return (
-                                        <CertificateManager
-                                            key={qual.id}
-                                            doctorId={doctorId}
-                                            qualificationId={qual.id}
-                                            qualificationName={qual.name}
-                                            qualificationDescription={qual.description}
-                                            qualificationRequirementMode={qual.certificate_requirement_mode}
-                                            qualificationValidityMonths={qual.certificate_validity_months}
-                                            qualificationRefreshValidityMonths={qual.certificate_refresh_validity_months}
-                                            qualificationBaseLabel={qual.certificate_base_label}
-                                            qualificationRefreshLabel={qual.certificate_refresh_label}
-                                            doctorQualificationId={dqEntry?.id || null}
-                                            doctorQualification={dqEntry || null}
-                                        />
-                                    );
-                                })}
-                            </div>
-                        )}
                     </div>
                 );
             })}
+            {assignedCertificateQualifications.length > 0 && (
+                <div className="space-y-2 pt-2">
+                    {assignedCertificateQualifications.map(qual => {
+                        const dqEntry = doctorQuals.find(dq => dq.qualification_id === qual.id);
+                        return (
+                            <CertificateManager
+                                key={qual.id}
+                                doctorId={doctorId}
+                                qualificationId={qual.id}
+                                qualificationName={qual.name}
+                                qualificationDescription={qual.description}
+                                qualificationRequirementMode={qual.certificate_requirement_mode}
+                                qualificationValidityMonths={qual.certificate_validity_months}
+                                qualificationRefreshValidityMonths={qual.certificate_refresh_validity_months}
+                                qualificationBaseLabel={qual.certificate_base_label}
+                                qualificationRefreshLabel={qual.certificate_refresh_label}
+                                doctorQualificationId={dqEntry?.id || null}
+                                doctorQualification={dqEntry || null}
+                            />
+                        );
+                    })}
+                </div>
+            )}
             {!doctorId && activeQuals.some(q => q.requires_certificate === true && assignedQualIds.includes(q.id)) && (
                 <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
                     Hinweis: Zertifikate können erst nach dem Speichern des Teammitglieds hochgeladen werden.
