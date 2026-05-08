@@ -113,12 +113,16 @@ const JWTAuthProviderInner = ({ children }) => {
     const login = async (email, password) => {
         console.log('[Auth] Login started for:', email);
         
-        // Zuerst alten DB-Token zurücksetzen (wichtig bei User-Wechsel)
+        // Zuerst alten DB-Token lokal sofort zurücksetzen (wichtig bei User-Wechsel)
         try {
-            await disableDbToken();
+            localStorage.setItem('db_token_enabled', 'false');
             localStorage.removeItem('active_token_id');
             localStorage.removeItem('db_credentials');
-            localStorage.removeItem('db_token_enabled');
+
+            // IndexedDB-Write nicht blockierend ausführen, damit Login nicht verzögert.
+            disableDbToken().catch((e) => {
+                console.error('[Auth] Failed to persist disabled DB token state:', e);
+            });
             console.log('[Auth] Cleared old DB tokens');
         } catch (e) {
             console.error('[Auth] Failed to clear old DB token:', e);
@@ -171,11 +175,16 @@ const JWTAuthProviderInner = ({ children }) => {
         setIsAuthenticated(false);
         queryClient.clear();
         
-        // DB-Token beim Logout zurücksetzen
+        // DB-Token beim Logout lokal sofort zurücksetzen.
+        // Persistenz nach IndexedDB erfolgt bewusst ohne await, damit Redirect nicht hängt.
         try {
-            await disableDbToken();
+            localStorage.setItem('db_token_enabled', 'false');
             localStorage.removeItem('active_token_id');
             localStorage.removeItem('db_credentials');
+
+            disableDbToken().catch((e) => {
+                console.error('Failed to persist disabled DB token on logout:', e);
+            });
         } catch (e) {
             console.error('Failed to disable DB token on logout:', e);
         }

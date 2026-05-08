@@ -42,7 +42,7 @@ function LayoutContent({ children }) {
     import('@/components/dbTokenStorage').then(({ initDbToken }) => {
         initDbToken();
     });
-  }, [location]);
+  }, []);
 
   // Global function to open ticket dialog (used by ErrorBoundary)
   useEffect(() => {
