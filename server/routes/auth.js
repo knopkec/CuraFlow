@@ -610,8 +610,7 @@ router.get('/events/stream', streamAuthMiddleware, async (req, res) => {
   const scope = buildRealtimeScope(dbToken);
 
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, no-transform');
   res.setHeader('X-Accel-Buffering', 'no');
 
   if (typeof res.flushHeaders === 'function') {
