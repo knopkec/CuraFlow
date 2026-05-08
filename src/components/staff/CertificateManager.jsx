@@ -27,6 +27,24 @@ const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'
 const MAX_SIZE = 5 * 1024 * 1024;
 const WARN_DAYS = 60;
 
+function isAllowedFile(file) {
+    if (!file) return false;
+    if (ALLOWED_TYPES.includes(file.type)) return true;
+    return file.type === '' && /\.(pdf|jpe?g|png)$/i.test(file.name || '');
+}
+
+function extractFileFromDataTransfer(dataTransfer) {
+    const items = Array.from(dataTransfer?.items || []);
+    for (const item of items) {
+        if (item.kind !== 'file') continue;
+        const file = item.getAsFile();
+        if (file) return file;
+    }
+
+    const files = Array.from(dataTransfer?.files || []);
+    return files[0] || null;
+}
+
 function formatDate(value) {
     if (!value) return '–';
     try {
@@ -311,7 +329,7 @@ export default function CertificateManager({
 
     const processSelectedFile = async (file) => {
         if (!file) return;
-        if (!ALLOWED_TYPES.includes(file.type)) {
+        if (!isAllowedFile(file)) {
             toast({ variant: 'destructive', title: 'Dateityp nicht erlaubt', description: 'Erlaubt: PDF, JPEG, PNG.' });
             return;
         }
@@ -407,7 +425,11 @@ export default function CertificateManager({
         e.stopPropagation();
         dragDepthRef.current = 0;
         setIsDragActive(false);
-        const file = e.dataTransfer.files?.[0];
+        const file = extractFileFromDataTransfer(e.dataTransfer);
+        if (!file) {
+            toast({ variant: 'destructive', title: 'Keine Datei erkannt', description: 'Bitte ziehen Sie eine PDF-, JPEG- oder PNG-Datei in das Feld.' });
+            return;
+        }
         await processSelectedFile(file);
     };
 
@@ -801,26 +823,18 @@ export default function CertificateManager({
                 <div className="border-t pt-3 space-y-2">
                     <div className="text-xs font-semibold text-slate-600">Neues Zertifikat hochladen</div>
                     <div
-                        role="button"
                         tabIndex={0}
-                        onClick={() => fileInputRef.current?.click()}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault();
-                                fileInputRef.current?.click();
-                            }
-                        }}
                         onDragEnter={handleDragEnter}
                         onDragOver={handleDragOver}
                         onDragLeave={handleDragLeave}
                         onDrop={handleDrop}
                         onPaste={handlePaste}
-                        className={`rounded-md border border-dashed px-4 py-4 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-amber-400 focus:ring-offset-2 ${
+                        className={`rounded-md border border-dashed px-4 py-4 transition-colors focus:outline-none focus:ring-2 focus:ring-amber-400 focus:ring-offset-2 ${
                             isDragActive
                                 ? 'border-amber-400 bg-amber-100/80'
                                 : 'border-amber-300 bg-amber-50/40 hover:bg-amber-50'
                         }`}
-                        aria-label="Zertifikat per Datei auswählen, Drag-and-Drop oder Einfügen hochladen"
+                        aria-label="Zertifikat per Drag-and-Drop oder Einfügen hochladen"
                     >
                         <input
                             ref={fileInputRef}
@@ -832,7 +846,7 @@ export default function CertificateManager({
                         <div className="flex flex-col gap-1 text-xs text-slate-600 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                             <div>
                                 <div className="font-medium text-slate-700">Datei auswählen, hierher ziehen oder Bild einfügen</div>
-                                <div>Erlaubt: PDF, JPEG, PNG bis 5 MB. Für Einfügen aus der Zwischenablage erst diese Fläche anklicken und dann einfügen.</div>
+                                <div>Erlaubt: PDF, JPEG, PNG bis 5 MB. Für Einfügen aus der Zwischenablage erst diese Fläche fokussieren und dann einfügen.</div>
                             </div>
                             <Button type="button" size="sm" variant="outline" className="w-full sm:w-auto" onClick={(e) => {
                                 e.stopPropagation();
