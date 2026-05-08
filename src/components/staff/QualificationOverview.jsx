@@ -228,7 +228,7 @@ export default function QualificationOverview({ doctors = [], isReadOnly = false
     }
 
     return (
-        <Card>
+        <Card className="flex h-full min-h-0 flex-col">
             <CardHeader className="pb-3">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
@@ -258,16 +258,16 @@ export default function QualificationOverview({ doctors = [], isReadOnly = false
                     )}
                 </div>
             </CardHeader>
-            <CardContent>
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+            <CardContent className="min-h-0 flex-1">
+                <div className="h-full overflow-auto rounded-lg border border-slate-200">
+                    <table className="min-w-max text-sm">
                         <thead>
                             <tr className="border-b">
-                                <th className="text-left py-2 px-3 font-medium text-slate-600 sticky left-0 bg-white min-w-[180px]">
+                                <th className="sticky left-0 top-0 z-20 min-w-[180px] bg-white px-3 py-2 text-left font-medium text-slate-600">
                                     Mitarbeiter
                                 </th>
                                 {activeQuals.map(qual => (
-                                    <th key={qual.id} className="text-center py-2 px-2 font-medium min-w-[80px]">
+                                    <th key={qual.id} className="sticky top-0 z-10 min-w-[80px] bg-white px-2 py-2 text-center font-medium">
                                         <div className="flex flex-col items-center gap-1">
                                             <Badge
                                                 style={{ 
@@ -291,7 +291,7 @@ export default function QualificationOverview({ doctors = [], isReadOnly = false
                                 const doctorQualIds = (byDoctor[doctor.id] || []).map(dq => dq.qualification_id);
                                 return (
                                     <tr key={doctor.id} className="border-b hover:bg-slate-50">
-                                        <td className="py-2 px-3 sticky left-0 bg-white">
+                                        <td className="sticky left-0 bg-white px-3 py-2">
                                             <div className="flex items-center gap-2">
                                                 <div className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-600 flex-shrink-0">
                                                     {doctor.initials || <User className="w-3 h-3" />}
@@ -359,7 +359,7 @@ export default function QualificationOverview({ doctors = [], isReadOnly = false
                         {/* Footer: Count per qualification */}
                         <tfoot>
                             <tr className="border-t bg-slate-50">
-                                <td className="py-2 px-3 text-xs font-semibold text-slate-500 sticky left-0 bg-slate-50">
+                                <td className="sticky left-0 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
                                     Gesamt
                                 </td>
                                 {activeQuals.map(qual => {
