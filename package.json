@@ -19,7 +19,10 @@
     "test:all": "vitest run --project unit --project component",
     "test:coverage": "vitest run --project unit --project component --coverage --passWithNoTests",
     "test:e2e": "playwright test --pass-with-no-tests",
-    "test:e2e:ui": "playwright test --ui --pass-with-no-tests"
+    "test:e2e:ui": "playwright test --ui --pass-with-no-tests",
+    "test:db:up": "docker compose -f docker-compose.test.yml down -v --remove-orphans && docker compose -f docker-compose.test.yml up -d --build mysql backend",
+    "test:db:down": "docker compose -f docker-compose.test.yml down -v --remove-orphans",
+    "test:db:seed": "docker compose -f docker-compose.test.yml exec -T backend npm run seed:test-data"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^17.0.0",
