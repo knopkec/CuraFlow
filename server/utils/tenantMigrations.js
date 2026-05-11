@@ -1,5 +1,3 @@
-import { clearColumnsCache } from '../routes/dbProxy.js';
-
 /**
  * Run all tenant-side migrations on a given database pool.
  * Idempotent — safe to call multiple times, skips already-applied migrations.
@@ -230,20 +228,20 @@ export async function runTenantMigrations(dbPool, cacheKey = 'default') {
 
   // ── ShiftTimeRule: Unique Key ändern für multi-Modell pro Workplace ──
   try {
-    const [keys] = await tenantDb.execute(
+    const [keys] = await dbPool.execute(
       `SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ShiftTimeRule'
        AND CONSTRAINT_NAME = 'uk_workplace_model' AND CONSTRAINT_TYPE = 'UNIQUE'`
     );
     if (keys.length > 0) {
-      await tenantDb.execute(`ALTER TABLE ShiftTimeRule DROP INDEX uk_workplace_model`);
+      await dbPool.execute(`ALTER TABLE ShiftTimeRule DROP INDEX uk_workplace_model`);
       results.push({ migration: 'drop_uk_workplace_model', status: 'applied' });
     }
   } catch (e) {
     // Already dropped or doesn't exist
   }
   try {
-    await tenantDb.execute(
+    await dbPool.execute(
       `ALTER TABLE ShiftTimeRule ADD UNIQUE KEY uk_shortcode_model (short_code, work_time_model_id)`
     );
     results.push({ migration: 'add_uk_shortcode_model', status: 'applied' });
@@ -253,11 +251,16 @@ export async function runTenantMigrations(dbPool, cacheKey = 'default') {
     }
   }
 
-  // Clear column cache so new columns are recognized immediately
-  clearColumnsCache([
-    'Workplace', 'WorkplaceTimeslot', 'ShiftEntry', 'TimeslotTemplate',
-    'TeamRole', 'WorkplaceQualification', 'Qualification', 'DoctorQualification', 'Doctor', 'ShiftTimeRule'
-  ], cacheKey);
+  // Clear column cache so new columns are recognized immediately when running inside the server.
+  try {
+    const { clearColumnsCache } = await import('../routes/dbProxy.js');
+    clearColumnsCache([
+      'Workplace', 'WorkplaceTimeslot', 'ShiftEntry', 'TimeslotTemplate',
+      'TeamRole', 'WorkplaceQualification', 'Qualification', 'DoctorQualification', 'Doctor', 'ShiftTimeRule'
+    ], cacheKey);
+  } catch (error) {
+    results.push({ migration: 'clear_columns_cache', status: 'skipped', reason: error.message });
+  }
 
   return results;
 }

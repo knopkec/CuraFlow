@@ -1,6 +1,25 @@
 export async function runMasterMigrations(dbPool) {
   const results = [];
 
+  const hasColumn = async (tableName, columnName) => {
+    const [rows] = await dbPool.execute(
+      `SELECT COUNT(*) AS cnt
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+      [tableName, columnName]
+    );
+    return Number(rows[0]?.cnt || 0) > 0;
+  };
+
+  const addColumnIfMissing = async (tableName, columnName, definition) => {
+    if (await hasColumn(tableName, columnName)) {
+      return false;
+    }
+
+    await dbPool.execute(`ALTER TABLE \`${tableName}\` ADD COLUMN \`${columnName}\` ${definition}`);
+    return true;
+  };
+
   const run = async (migration, execute, options = {}) => {
     const { duplicateCodes = [], duplicateReason = 'Bereits vorhanden' } = options;
 
@@ -18,38 +37,32 @@ export async function runMasterMigrations(dbPool) {
   };
 
   await run('add_allowed_tenants', async () => {
-    await dbPool.execute(`
-      ALTER TABLE app_users
-      ADD COLUMN IF NOT EXISTS allowed_tenants JSON DEFAULT NULL
-    `);
+    await addColumnIfMissing('app_users', 'allowed_tenants', 'JSON DEFAULT NULL');
   }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalte bereits vorhanden' });
 
   await run('add_must_change_password', async () => {
-    await dbPool.execute(`
-      ALTER TABLE app_users
-      ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE
-    `);
+    await addColumnIfMissing('app_users', 'must_change_password', 'BOOLEAN DEFAULT FALSE');
   }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalte bereits vorhanden' });
 
   await run('add_email_verified', async () => {
-    await dbPool.execute(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email_verified TINYINT(1) DEFAULT 0`);
-    await dbPool.execute(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email_verified_date DATETIME DEFAULT NULL`);
+    await addColumnIfMissing('app_users', 'email_verified', 'TINYINT(1) DEFAULT 0');
+    await addColumnIfMissing('app_users', 'email_verified_date', 'DATETIME DEFAULT NULL');
   }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalten bereits vorhanden' });
 
   await run('add_last_seen_at', async () => {
-    await dbPool.execute(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS last_seen_at DATETIME DEFAULT NULL`);
+    await addColumnIfMissing('app_users', 'last_seen_at', 'DATETIME DEFAULT NULL');
   }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalte bereits vorhanden' });
 
   await run('add_schedule_initials_only', async () => {
-    await dbPool.execute(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS schedule_initials_only TINYINT(1) DEFAULT 0`);
+    await addColumnIfMissing('app_users', 'schedule_initials_only', 'TINYINT(1) DEFAULT 0');
   }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalte bereits vorhanden' });
 
   await run('add_schedule_sort_doctors_alphabetically', async () => {
-    await dbPool.execute(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS schedule_sort_doctors_alphabetically TINYINT(1) DEFAULT 0`);
+    await addColumnIfMissing('app_users', 'schedule_sort_doctors_alphabetically', 'TINYINT(1) DEFAULT 0');
   }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalte bereits vorhanden' });
 
   await run('add_schedule_show_time_account', async () => {
-    await dbPool.execute(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS schedule_show_time_account TINYINT(1) DEFAULT 0`);
+    await addColumnIfMissing('app_users', 'schedule_show_time_account', 'TINYINT(1) DEFAULT 0');
   }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalte bereits vorhanden' });
 
   await run('create_email_verification_table', async () => {
@@ -236,16 +249,16 @@ export async function runMasterMigrations(dbPool) {
 
   // Add LLM analysis columns to QualificationCertificate (idempotent)
   await run('add_qc_analysis_columns', async () => {
-    await dbPool.execute(`ALTER TABLE QualificationCertificate ADD COLUMN IF NOT EXISTS evidence_role VARCHAR(32) DEFAULT 'single'`);
-    await dbPool.execute(`ALTER TABLE QualificationCertificate ADD COLUMN IF NOT EXISTS analysis_status ENUM('pending','passed','warning','failed','skipped','error') DEFAULT 'pending'`);
-    await dbPool.execute(`ALTER TABLE QualificationCertificate ADD COLUMN IF NOT EXISTS analysis_is_certificate TINYINT(1) DEFAULT NULL`);
-    await dbPool.execute(`ALTER TABLE QualificationCertificate ADD COLUMN IF NOT EXISTS analysis_scope_match TINYINT(1) DEFAULT NULL`);
-    await dbPool.execute(`ALTER TABLE QualificationCertificate ADD COLUMN IF NOT EXISTS analysis_scope_detected VARCHAR(255) DEFAULT NULL`);
-    await dbPool.execute(`ALTER TABLE QualificationCertificate ADD COLUMN IF NOT EXISTS analysis_confidence FLOAT DEFAULT NULL`);
-    await dbPool.execute(`ALTER TABLE QualificationCertificate ADD COLUMN IF NOT EXISTS analysis_reasoning TEXT DEFAULT NULL`);
-    await dbPool.execute(`ALTER TABLE QualificationCertificate ADD COLUMN IF NOT EXISTS analysis_detected_granted DATE DEFAULT NULL`);
-    await dbPool.execute(`ALTER TABLE QualificationCertificate ADD COLUMN IF NOT EXISTS analysis_detected_expiry DATE DEFAULT NULL`);
-    await dbPool.execute(`ALTER TABLE QualificationCertificate ADD COLUMN IF NOT EXISTS analyzed_at DATETIME DEFAULT NULL`);
+    await addColumnIfMissing('QualificationCertificate', 'evidence_role', `VARCHAR(32) DEFAULT 'single'`);
+    await addColumnIfMissing('QualificationCertificate', 'analysis_status', `ENUM('pending','passed','warning','failed','skipped','error') DEFAULT 'pending'`);
+    await addColumnIfMissing('QualificationCertificate', 'analysis_is_certificate', 'TINYINT(1) DEFAULT NULL');
+    await addColumnIfMissing('QualificationCertificate', 'analysis_scope_match', 'TINYINT(1) DEFAULT NULL');
+    await addColumnIfMissing('QualificationCertificate', 'analysis_scope_detected', 'VARCHAR(255) DEFAULT NULL');
+    await addColumnIfMissing('QualificationCertificate', 'analysis_confidence', 'FLOAT DEFAULT NULL');
+    await addColumnIfMissing('QualificationCertificate', 'analysis_reasoning', 'TEXT DEFAULT NULL');
+    await addColumnIfMissing('QualificationCertificate', 'analysis_detected_granted', 'DATE DEFAULT NULL');
+    await addColumnIfMissing('QualificationCertificate', 'analysis_detected_expiry', 'DATE DEFAULT NULL');
+    await addColumnIfMissing('QualificationCertificate', 'analyzed_at', 'DATETIME DEFAULT NULL');
   }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalten bereits vorhanden' });
 
 

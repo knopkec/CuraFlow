@@ -106,6 +106,7 @@ This application runs in hospital environments. Security failures can have regul
 - **Never log patient or staff personal data** (names, IDs, dates of birth, email addresses). Use opaque identifiers (database IDs, UIDs) in log output.
 - **Never include PHI in error messages** returned to the client.
 - **Never commit credentials, secrets, or API keys** to version control. All secrets must come from environment variables.
+- **Never hardcode passwords** (including demo/test/seed passwords) in source files, scripts, fixtures, Docker/compose files, tests, or docs. Use required environment variables instead.
 - **Sanitize all user-facing output** to prevent XSS. React handles this by default — never use `dangerouslySetInnerHTML` without explicit sanitization.
 - **Never expose internal system details** (stack traces, SQL errors, file paths) in API responses outside of development mode.
 
