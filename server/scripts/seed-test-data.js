@@ -18,7 +18,6 @@ const MYSQL_PORT = Number(process.env.MYSQL_PORT || '3306');
 const MYSQL_USER = process.env.MYSQL_USER || 'curaflow';
 const MYSQL_PASSWORD = process.env.MYSQL_PASSWORD || '';
 const MYSQL_ROOT_PASSWORD = process.env.MYSQL_ROOT_PASSWORD || '';
-const CONFIRM_SEED_TEST_DATA = process.env.CONFIRM_SEED_TEST_DATA;
 function requiredEnv(name) {
   const value = process.env[name];
   if (!value) {
