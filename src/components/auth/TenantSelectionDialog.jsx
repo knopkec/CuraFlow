@@ -105,8 +105,8 @@ export default function TenantSelectionDialog({ open, onComplete, tenants = [], 
     if (open && tenants.length === 1 && !hasFullAccess) {
         return (
             <Dialog open={open}>
-                <DialogContent className="sm:max-w-md">
-                    <div className="flex flex-col items-center justify-center py-8">
+                <DialogContent className="sm:max-w-md" data-testid="tenant-selection-dialog">
+                    <div className="flex flex-col items-center justify-center py-8" data-testid="tenant-selection-auto-activating">
                         <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mb-4" />
                         <p className="text-slate-600">Mandant wird aktiviert...</p>
                         <p className="text-sm text-slate-500 mt-2">{tenants[0]?.name}</p>
@@ -118,7 +118,7 @@ export default function TenantSelectionDialog({ open, onComplete, tenants = [], 
 
     return (
         <Dialog open={open}>
-            <DialogContent className="sm:max-w-lg">
+            <DialogContent className="sm:max-w-lg" data-testid="tenant-selection-dialog">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         <Building2 className="w-5 h-5 text-indigo-600" />
@@ -170,6 +170,7 @@ export default function TenantSelectionDialog({ open, onComplete, tenants = [], 
                         return (
                         <Card 
                             key={tenant.id}
+                            data-testid={`tenant-card-${tenant.id}`}
                             className={`p-4 cursor-pointer transition-all hover:border-indigo-300 hover:shadow-sm ${
                                 selectedId === tenant.id ? 'border-indigo-500 bg-indigo-50' : ''
                             } ${wasLastActive ? 'border-indigo-300' : ''}`}

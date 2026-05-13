@@ -144,7 +144,7 @@ function LayoutContent({ children }) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 notranslate" translate="no">
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 notranslate" translate="no" data-testid="app-shell">
       {/* Sidebar Navigation */}
       {/* Overlay for mobile */}
       {isSidebarOpen && (
@@ -155,6 +155,7 @@ function LayoutContent({ children }) {
       )}
 
       <aside 
+        data-testid="app-sidebar"
         className={`fixed left-0 top-0 z-40 h-screen w-64 border-r border-slate-200 bg-white shadow-sm transition-transform duration-300 ${
           isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
@@ -277,6 +278,7 @@ function LayoutContent({ children }) {
               <>
                 <div className="my-2 border-t border-slate-100 mx-3" />
                 <Link
+                  data-testid="nav-link-admin"
                   to={createPageUrl('Admin')}
                   className="flex items-center rounded-lg px-3 py-2 text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 group transition-colors"
                 >
@@ -320,6 +322,7 @@ function LayoutContent({ children }) {
         <header className="h-16 border-b border-slate-200 bg-white flex items-center px-4 sticky top-0 z-30">
           {!isSidebarOpen && (
             <button 
+              data-testid="sidebar-open-button"
               onClick={() => setIsSidebarOpen(true)}
               className="mr-4 p-2 rounded-md text-slate-500 hover:bg-slate-100"
             >

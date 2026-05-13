@@ -17,7 +17,7 @@ async function importSeedModule(envOverrides) {
   };
 
   vi.resetModules();
-  return import('../scripts/seed-test-data.js');
+  return import('../scripts/seed-test-data-safety.js');
 }
 
 afterEach(() => {

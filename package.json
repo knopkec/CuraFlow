@@ -19,10 +19,11 @@
     "test:all": "vitest run --project unit --project component",
     "test:coverage": "vitest run --project unit --project component --coverage --passWithNoTests",
     "test:e2e": "playwright test --pass-with-no-tests",
+    "test:e2e:install": "playwright install chromium firefox",
     "test:e2e:ui": "playwright test --ui --pass-with-no-tests",
-    "test:db:up": "docker compose -f docker-compose.test.yml down -v --remove-orphans && docker compose -f docker-compose.test.yml up -d --build mysql backend",
-    "test:db:down": "docker compose -f docker-compose.test.yml down -v --remove-orphans",
-    "test:db:seed": "docker compose -f docker-compose.test.yml exec -T backend npm run seed:test-data"
+    "test:db:up": "node ./scripts/with-test-env.js docker compose -f docker-compose.test.yml down -v --remove-orphans && node ./scripts/with-test-env.js docker compose -f docker-compose.test.yml up -d --build mysql backend",
+    "test:db:down": "node ./scripts/with-test-env.js docker compose -f docker-compose.test.yml down -v --remove-orphans",
+    "test:db:seed": "node ./scripts/with-test-env.js docker compose -f docker-compose.test.yml exec -T backend npm run seed:test-data"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^17.0.0",
@@ -101,6 +102,7 @@
     "@vitest/coverage-v8": "^4.1.5",
     "autoprefixer": "^10.4.20",
     "baseline-browser-mapping": "^2.9.18",
+    "dotenv": "^16.6.1",
     "eslint": "^9.19.0",
     "eslint-plugin-react": "^7.37.4",
     "eslint-plugin-react-hooks": "^5.0.0",

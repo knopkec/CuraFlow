@@ -105,7 +105,7 @@ export default function AuthLoginPage() {
                 </CardHeader>
 
                 <CardContent>
-                    <form onSubmit={handleSubmit} className="space-y-4">
+                    <form onSubmit={handleSubmit} className="space-y-4" data-testid="auth-login-form">
                         {error && (
                             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center gap-2">
                                 <AlertCircle className="w-4 h-4 flex-shrink-0" />
@@ -116,6 +116,7 @@ export default function AuthLoginPage() {
                         <div className="space-y-2">
                             <Label htmlFor="email">E-Mail</Label>
                             <Input
+                                data-testid="auth-login-email"
                                 id="email"
                                 type="email"
                                 placeholder="name@beispiel.de"
@@ -131,6 +132,7 @@ export default function AuthLoginPage() {
                             <Label htmlFor="password">Passwort</Label>
                             <div className="relative">
                                 <Input
+                                    data-testid="auth-login-password"
                                     id="password"
                                     type={showPassword ? 'text' : 'password'}
                                     placeholder="••••••••"
@@ -155,6 +157,7 @@ export default function AuthLoginPage() {
                         </div>
 
                         <Button
+                            data-testid="auth-login-submit"
                             type="submit"
                             className="w-full bg-indigo-600 hover:bg-indigo-700"
                             disabled={isSubmitting}

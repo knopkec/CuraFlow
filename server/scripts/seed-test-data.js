@@ -4,6 +4,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { encryptToken } from '../utils/crypto.js';
 import { runMasterMigrations } from '../utils/masterMigrations.js';
+import { assertSafeIdentifier, assertSafeTestEnvironment } from './seed-test-data-safety.js';
+import { ensureColumns, hasTable } from '../utils/schema.js';
 import { runTenantMigrations } from '../utils/tenantMigrations.js';
 
 const MASTER_DB_NAME = process.env.MYSQL_DATABASE || 'curaflow_test_master';
@@ -17,8 +19,6 @@ const MYSQL_USER = process.env.MYSQL_USER || 'curaflow';
 const MYSQL_PASSWORD = process.env.MYSQL_PASSWORD || '';
 const MYSQL_ROOT_PASSWORD = process.env.MYSQL_ROOT_PASSWORD || '';
 const CONFIRM_SEED_TEST_DATA = process.env.CONFIRM_SEED_TEST_DATA;
-const LOCAL_TEST_HOSTS = new Set(['127.0.0.1', '::1', 'localhost', 'mysql']);
-
 function requiredEnv(name) {
   const value = process.env[name];
   if (!value) {
@@ -163,42 +163,6 @@ async function executeStatements(pool, statements) {
   }
 }
 
-export function assertSafeIdentifier(value, label) {
-  if (!/^[A-Za-z0-9_]+$/.test(value)) {
-    throw new Error(`${label} contains unsupported characters: ${value}`);
-  }
-}
-
-export function assertSafeHost(value, label) {
-  const normalizedValue = String(value || '').trim().toLowerCase();
-  if (!LOCAL_TEST_HOSTS.has(normalizedValue)) {
-    throw new Error(`${label} must be local for test seeding. Received: ${value}`);
-  }
-}
-
-export function assertSafeTestEnvironment() {
-  if (process.env.NODE_ENV !== 'test') {
-    throw new Error('seed-test-data.js may only run with NODE_ENV=test');
-  }
-
-  if (CONFIRM_SEED_TEST_DATA !== '1') {
-    throw new Error('CONFIRM_SEED_TEST_DATA=1 is required to run seed-test-data.js');
-  }
-
-  const requiredTestPatterns = [
-    { label: 'MYSQL_DATABASE', value: MASTER_DB_NAME },
-    { label: 'TEST_TENANT_DATABASE', value: TENANT_DB_NAME },
-  ];
-
-  for (const entry of requiredTestPatterns) {
-    if (!/test/i.test(entry.value)) {
-      throw new Error(`${entry.label} must clearly target a test database. Received: ${entry.value}`);
-    }
-  }
-
-  assertSafeHost(MYSQL_HOST, 'MYSQL_HOST');
-}
-
 async function ensureMasterBaseTables(masterPool) {
   await executeStatements(masterPool, [
     `CREATE TABLE IF NOT EXISTS app_users (
@@ -245,11 +209,13 @@ async function ensureMasterBaseTables(masterPool) {
     ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
   ]);
 
-  await executeStatements(masterPool, [
-    `ALTER TABLE SystemLog ADD COLUMN IF NOT EXISTS details TEXT AFTER message`,
-    `ALTER TABLE SystemLog ADD COLUMN IF NOT EXISTS updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_date`,
-    `ALTER TABLE SystemLog ADD COLUMN IF NOT EXISTS created_by VARCHAR(255) AFTER updated_date`,
-  ]);
+  if (await hasTable(masterPool, 'SystemLog')) {
+    await ensureColumns(masterPool, 'SystemLog', [
+      ['details', 'TEXT DEFAULT NULL'],
+      ['updated_date', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'],
+      ['created_by', 'VARCHAR(255) DEFAULT NULL'],
+    ]);
+  }
 }
 
 async function ensureTenantDatabase(rootPool) {

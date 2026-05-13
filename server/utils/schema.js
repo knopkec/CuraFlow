@@ -19,6 +19,17 @@ export function clearColumnsCache(tableNames = null, cacheKey = null) {
   }
 }
 
+export async function hasTable(dbPool, tableName) {
+  const [rows] = await dbPool.execute(
+    `SELECT COUNT(*) AS cnt
+     FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+    [tableName]
+  );
+
+  return Number(rows[0]?.cnt || 0) > 0;
+}
+
 export async function hasColumn(dbPool, tableName, columnName) {
   const [rows] = await dbPool.execute(
     `SELECT COUNT(*) AS cnt

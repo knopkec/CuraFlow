@@ -1,6 +1,7 @@
 #env
 .env
 .env.*
+!.env.test.example
 
 # Logs
 logs
@@ -16,6 +17,9 @@ dist
 .vite
 dist-ssr
 *.local
+playwright-report/
+test-results/
+e2e/.auth/
 
 # Editor directories and files
 .vscode/*
@@ -27,8 +31,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-
-.env
 
 # Excel files
 *.xlsx
