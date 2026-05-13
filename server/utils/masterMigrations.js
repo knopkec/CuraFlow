@@ -225,11 +225,9 @@ export async function runMasterMigrations(dbPool) {
   }, { duplicateCodes: ['ER_TABLE_EXISTS_ERROR'], duplicateReason: 'Tabelle bereits vorhanden' });
 
   await run('add_employee_work_time_model_id', async () => {
-    await dbPool.execute(`
-      ALTER TABLE Employee
-      ADD COLUMN work_time_model_id VARCHAR(36) DEFAULT NULL
-    `);
-  }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalte bereits vorhanden' });
+    const changed = await addColumnIfMissing('Employee', 'work_time_model_id', 'VARCHAR(36) DEFAULT NULL');
+    return changed || SKIPPED;
+  }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalte bereits vorhanden', skippedReason: 'Spalte bereits vorhanden' });
 
   // ===== PHASE 4: Time Accounts (Master-DB) =====
 

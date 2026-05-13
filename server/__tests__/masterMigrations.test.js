@@ -19,6 +19,28 @@ function createMockDbPool() {
 }
 
 describe('runMasterMigrations', () => {
+  it('checks Employee.work_time_model_id before altering the Employee table', async () => {
+    const dbPool = createMockDbPool();
+
+    await runMasterMigrations(dbPool);
+
+    const employeeCalls = dbPool.calls.filter(
+      ({ sql, params }) =>
+        sql.includes('ALTER TABLE `Employee` ADD COLUMN `work_time_model_id`') ||
+        (sql.includes('FROM information_schema.COLUMNS') && params[0] === 'Employee')
+    );
+
+    expect(employeeCalls).toEqual([
+      expect.objectContaining({
+        sql: expect.stringContaining('FROM information_schema.COLUMNS'),
+        params: ['Employee', 'work_time_model_id'],
+      }),
+      expect.objectContaining({
+        sql: expect.stringContaining('ALTER TABLE `Employee` ADD COLUMN `work_time_model_id` VARCHAR(36) DEFAULT NULL'),
+      }),
+    ]);
+  });
+
   it('adds QualificationCertificate analysis columns sequentially', async () => {
     const dbPool = createMockDbPool();
 
