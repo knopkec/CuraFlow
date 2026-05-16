@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, db } from "@/api/client";
 import { useAuth } from '@/components/AuthProvider';
@@ -27,7 +27,11 @@ export default function ServiceStaffingPage() {
     const { getSectionName } = useSectionConfig();
     const { isPublicHoliday } = useHolidays();
     const [currentDate, setCurrentDate] = useState(new Date());
+    const [hasHorizontalOverflow, setHasHorizontalOverflow] = useState(false);
     const queryClient = useQueryClient();
+    const tableScrollRef = useRef(null);
+    const stickyScrollbarRef = useRef(null);
+    const stickyScrollbarInnerRef = useRef(null);
     const servicesCaption = getSectionName('Dienste');
     const servicesPageTitle = servicesCaption === 'Dienste' ? 'Dienstbesetzung' : servicesCaption;
     const alphabeticalDoctorSorting = useMemo(() => isAlphabeticalDoctorSortingEnabled(user), [user]);
@@ -375,8 +379,73 @@ export default function ServiceStaffingPage() {
         window.print();
     };
 
+    const syncHorizontalScrollMetrics = useCallback(() => {
+        const tableScrollElement = tableScrollRef.current;
+        const stickyScrollbarElement = stickyScrollbarRef.current;
+        const stickyScrollbarInnerElement = stickyScrollbarInnerRef.current;
+
+        if (!tableScrollElement || !stickyScrollbarElement || !stickyScrollbarInnerElement) {
+            return;
+        }
+
+        stickyScrollbarInnerElement.style.width = `${tableScrollElement.scrollWidth}px`;
+        stickyScrollbarElement.scrollLeft = tableScrollElement.scrollLeft;
+        setHasHorizontalOverflow(tableScrollElement.scrollWidth > tableScrollElement.clientWidth + 1);
+    }, []);
+
+    useEffect(() => {
+        const tableScrollElement = tableScrollRef.current;
+        const stickyScrollbarElement = stickyScrollbarRef.current;
+        if (!tableScrollElement || !stickyScrollbarElement) {
+            return undefined;
+        }
+
+        let isSyncing = false;
+
+        const syncFromTable = () => {
+            if (isSyncing) return;
+            isSyncing = true;
+            stickyScrollbarElement.scrollLeft = tableScrollElement.scrollLeft;
+            requestAnimationFrame(() => {
+                isSyncing = false;
+            });
+        };
+
+        const syncFromStickyBar = () => {
+            if (isSyncing) return;
+            isSyncing = true;
+            tableScrollElement.scrollLeft = stickyScrollbarElement.scrollLeft;
+            requestAnimationFrame(() => {
+                isSyncing = false;
+            });
+        };
+
+        syncHorizontalScrollMetrics();
+
+        const resizeObserver = new ResizeObserver(() => {
+            syncHorizontalScrollMetrics();
+        });
+
+        resizeObserver.observe(tableScrollElement);
+        const tableElement = tableScrollElement.querySelector('table');
+        if (tableElement) {
+            resizeObserver.observe(tableElement);
+        }
+
+        tableScrollElement.addEventListener('scroll', syncFromTable);
+        stickyScrollbarElement.addEventListener('scroll', syncFromStickyBar);
+        window.addEventListener('resize', syncHorizontalScrollMetrics);
+
+        return () => {
+            resizeObserver.disconnect();
+            tableScrollElement.removeEventListener('scroll', syncFromTable);
+            stickyScrollbarElement.removeEventListener('scroll', syncFromStickyBar);
+            window.removeEventListener('resize', syncHorizontalScrollMetrics);
+        };
+    }, [days.length, serviceTypes.length, syncHorizontalScrollMetrics]);
+
     return (
-        <div className="container mx-auto max-w-5xl p-2 sm:p-4 print:p-0 print:max-w-none">
+        <div className="w-full max-w-none p-2 sm:p-4 lg:px-2 print:p-0 print:max-w-none">
             {/* Header - Hidden on Print */}
             <div className="flex flex-col gap-4 mb-4 sm:mb-6 print:hidden">
                 <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">{servicesPageTitle}</h1>
@@ -428,7 +497,10 @@ export default function ServiceStaffingPage() {
                 </h1>
             </div>
 
-            <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto print:border-0 print:shadow-none">
+            <div
+                ref={tableScrollRef}
+                className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto print:border-0 print:shadow-none"
+            >
                 <table className="w-full text-xs sm:text-sm text-left min-w-[600px]">
                     <thead className="bg-slate-50 border-b border-slate-200 print:bg-slate-100">
                         <tr>
@@ -673,6 +745,21 @@ export default function ServiceStaffingPage() {
                     </tbody>
                 </table>
             </div>
+
+            {hasHorizontalOverflow ? (
+                <div className="sticky bottom-0 z-20 mt-3 border border-slate-200 bg-white/95 shadow-sm backdrop-blur print:hidden">
+                    <div className="flex items-center justify-between border-b border-slate-100 px-3 py-1.5 text-[11px] text-slate-500">
+                        <span>Horizontale Tabelle</span>
+                        <span>Zum Scrollen ziehen</span>
+                    </div>
+                    <div
+                        ref={stickyScrollbarRef}
+                        className="overflow-x-auto overflow-y-hidden px-2 py-2"
+                    >
+                        <div ref={stickyScrollbarInnerRef} className="h-2 rounded-full bg-slate-200/80" />
+                    </div>
+                </div>
+            ) : null}
             
             {/* Print Footer */}
             <div className="hidden print:block mt-8 text-xs text-slate-400 text-center">
