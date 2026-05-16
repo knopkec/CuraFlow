@@ -81,7 +81,7 @@ export default function ServiceStaffingPage() {
         confirmOverride,
         cancelOverride,
         setOverrideDialogOpen,
-    } = useOverrideValidation();
+    } = useOverrideValidation({ user, doctors });
 
     const serviceTypes = useMemo(() => {
         const dynamicServices = workplaces

@@ -11,7 +11,7 @@ import { de } from 'date-fns/locale';
  * - Das Logging von Overrides
  * - Die Integration mit der Shift-Validierung
  */
-export function useOverrideValidation({ user, doctors = [] }) {
+export function useOverrideValidation({ user, doctors = [] } = {}) {
     const [overrideDialog, setOverrideDialog] = useState({
         open: false,
         blockers: [],
