@@ -12,6 +12,7 @@ import { useShiftValidation } from '@/components/validation/useShiftValidation';
 import { useOverrideValidation } from '@/components/validation/useOverrideValidation';
 import OverrideConfirmDialog from '@/components/validation/OverrideConfirmDialog';
 import { trackDbChange } from '@/components/utils/dbTracker';
+import { useTeamRoles } from '@/components/settings/TeamRoleSettings';
 import { useAllDoctorQualifications, useAllWorkplaceQualifications, useQualifications } from '@/hooks/useQualifications';
 import { isWishOnDate } from '@/utils/wishRange';
 import { isAlphabeticalDoctorSortingEnabled, sortDoctorsAlphabetically } from '@/utils/doctorSorting';
