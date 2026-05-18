@@ -166,6 +166,10 @@ test.describe('staff workflows', () => {
       await staffPage.dragDoctorBefore(secondDoctor.id, firstDoctor.id);
 
       await expect
+        .poll(async () => (await staffPage.doctorIdsInVisualOrder()).slice(0, 2), { timeout: 10_000 })
+        .toEqual([secondDoctor.id, firstDoctor.id]);
+
+      await expect
         .poll(async () => {
           const reorderedDoctor = await dbGet<{ order: number | null }>(request, authHeaders, 'Doctor', secondDoctor.id);
           return reorderedDoctor.order;
@@ -174,9 +178,42 @@ test.describe('staff workflows', () => {
 
       assertNoPageErrors(pageErrors);
     } finally {
-      if (authHeaders) {
-        for (const doctor of originalDoctors) {
-          await dbUpdate(request, authHeaders, 'Doctor', doctor.id, { order: doctor.order ?? 0 });
+      if (authHeaders && originalDoctors.length > 0) {
+        const hadTestErrors = test.info().errors.length > 0;
+        const restoreErrors: Error[] = [];
+
+        try {
+          const currentDoctors = await dbList<{
+            id: string;
+            order: number | null;
+          }>(request, authHeaders, 'Doctor');
+          const currentOrders = new Map(currentDoctors.map((doctor) => [doctor.id, doctor.order ?? 0]));
+
+          for (const doctor of originalDoctors) {
+            const originalOrder = doctor.order ?? 0;
+
+            if (currentOrders.get(doctor.id) === originalOrder) {
+              continue;
+            }
+
+            try {
+              await dbUpdate(request, authHeaders, 'Doctor', doctor.id, { order: originalOrder });
+            } catch (error) {
+              restoreErrors.push(error instanceof Error ? error : new Error(String(error)));
+            }
+          }
+        } catch (error) {
+          restoreErrors.push(error instanceof Error ? error : new Error(String(error)));
+        }
+
+        if (restoreErrors.length > 0) {
+          const restoreError = new AggregateError(restoreErrors, 'Failed to restore seeded staff ordering after reorder test');
+
+          if (hadTestErrors) {
+            console.error(restoreError);
+          } else {
+            throw restoreError;
+          }
         }
       }
     }

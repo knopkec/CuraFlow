@@ -12,6 +12,7 @@ type StaffDoctorFormData = {
 
 export class StaffPage {
   readonly pageRoot: Locator;
+  readonly doctorList: Locator;
   readonly addButton: Locator;
   readonly form: Locator;
   readonly nameInput: Locator;
@@ -24,6 +25,7 @@ export class StaffPage {
 
   constructor(private readonly page: Page) {
     this.pageRoot = page.getByTestId('staff-page');
+    this.doctorList = page.getByTestId('staff-doctor-list');
     this.addButton = page.getByTestId('staff-add-button');
     this.form = page.getByTestId('staff-doctor-form');
     this.nameInput = page.getByTestId('staff-form-name');
@@ -141,10 +143,27 @@ export class StaffPage {
       throw new Error('Unable to calculate drag target for staff reorder');
     }
 
+    const dropY = targetBox.y + Math.max(2, Math.min(6, targetBox.height * 0.1));
+
     await this.page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
     await this.page.mouse.down();
-    await this.page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + 12, { steps: 12 });
+    await this.page.mouse.move(targetBox.x + targetBox.width / 2, dropY, { steps: 12 });
     await this.page.mouse.up();
+  }
+
+  async doctorIdsInVisualOrder() {
+    return this.doctorList.locator('[data-testid^="staff-doctor-card-"]').evaluateAll((elements) => {
+      const orderedIds = [];
+
+      for (const element of elements) {
+        const testId = element.getAttribute('data-testid');
+        if (testId) {
+          orderedIds.push(testId.replace('staff-doctor-card-', ''));
+        }
+      }
+
+      return orderedIds;
+    });
   }
 
   async deleteDoctor(doctorId: string) {

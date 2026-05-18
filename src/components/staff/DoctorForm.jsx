@@ -277,7 +277,7 @@ export default function DoctorForm({ open, onOpenChange, doctor, onSubmit }) {
                   <div>
                     <Input
                       id="target_weekly_hours"
-                      data-testid="staff-form-target-hours"
+                      data-testid="staff-form-target-hours-readonly"
                       type="number"
                       value={(() => {
                         const emp = centralEmployees.find(e => e.id === formData.central_employee_id);

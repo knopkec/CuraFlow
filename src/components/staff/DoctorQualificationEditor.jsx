@@ -103,6 +103,7 @@ export default function DoctorQualificationEditor({ doctorId, selectedQualIds = 
                                 key={qual.id}
                                 type="button"
                                 onClick={() => toggleHandler(qual.id)}
+                                aria-pressed={isAssigned}
                                 data-testid={`doctor-qualification-toggle-${qual.id}`}
                                 className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
                                     isAssigned 
@@ -179,23 +180,17 @@ export default function DoctorQualificationEditor({ doctorId, selectedQualIds = 
                                 const requiresCert = qual.requires_certificate === true;
                                 const handleToggle = () => toggleHandler(qual.id);
                                 return (
-                                    <div
+                                    <button
                                         key={qual.id}
-                                        role="button"
-                                        tabIndex={0}
+                                        type="button"
+                                        aria-pressed={isAssigned}
                                         onClick={handleToggle}
-                                        onKeyDown={(event) => {
-                                            if (event.key === 'Enter' || event.key === ' ') {
-                                                event.preventDefault();
-                                                handleToggle();
-                                            }
-                                        }}
                                         data-testid={`doctor-qualification-toggle-${qual.id}`}
                                         title={qual.description || qual.name}
-                                        className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md border text-left transition-all ${
+                                        className={`flex w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-1 ${
                                             isAssigned
                                                 ? 'border-indigo-300 bg-white shadow-sm'
-                                                : 'border-slate-200 bg-slate-50/60 hover:bg-white hover:border-slate-300 opacity-80'
+                                                : 'border-slate-200 bg-slate-50/60 hover:border-slate-300 hover:bg-white opacity-80'
                                         }`}
                                     >
                                         <div
@@ -226,7 +221,7 @@ export default function DoctorQualificationEditor({ doctorId, selectedQualIds = 
                                                 title="Zertifikat erforderlich"
                                             />
                                         )}
-                                    </div>
+                                    </button>
                                 );
                             })}
                         </div>
