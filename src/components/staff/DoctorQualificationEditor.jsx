@@ -2,7 +2,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/api/client';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Award, Check, FileCheck } from 'lucide-react';
 import { useQualifications } from '@/hooks/useQualifications';
 import CertificateManager from '@/components/staff/CertificateManager';
@@ -104,6 +103,7 @@ export default function DoctorQualificationEditor({ doctorId, selectedQualIds = 
                                 key={qual.id}
                                 type="button"
                                 onClick={() => toggleHandler(qual.id)}
+                                data-testid={`doctor-qualification-toggle-${qual.id}`}
                                 className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
                                     isAssigned 
                                         ? 'ring-2 ring-offset-1 ring-indigo-400' 
@@ -177,11 +177,20 @@ export default function DoctorQualificationEditor({ doctorId, selectedQualIds = 
                             {catQuals.map(qual => {
                                 const isAssigned = assignedQualIds.includes(qual.id);
                                 const requiresCert = qual.requires_certificate === true;
+                                const handleToggle = () => toggleHandler(qual.id);
                                 return (
-                                    <button
+                                    <div
                                         key={qual.id}
-                                        type="button"
-                                        onClick={() => toggleHandler(qual.id)}
+                                        role="button"
+                                        tabIndex={0}
+                                        onClick={handleToggle}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter' || event.key === ' ') {
+                                                event.preventDefault();
+                                                handleToggle();
+                                            }
+                                        }}
+                                        data-testid={`doctor-qualification-toggle-${qual.id}`}
                                         title={qual.description || qual.name}
                                         className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md border text-left transition-all ${
                                             isAssigned
@@ -189,11 +198,16 @@ export default function DoctorQualificationEditor({ doctorId, selectedQualIds = 
                                                 : 'border-slate-200 bg-slate-50/60 hover:bg-white hover:border-slate-300 opacity-80'
                                         }`}
                                     >
-                                        <Checkbox
-                                            checked={isAssigned}
-                                            onCheckedChange={() => toggleHandler(qual.id)}
-                                            className="pointer-events-none shrink-0"
-                                        />
+                                        <div
+                                            className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border ${
+                                                isAssigned
+                                                    ? 'border-indigo-600 bg-indigo-600 text-white'
+                                                    : 'border-slate-300 text-transparent'
+                                            }`}
+                                            aria-hidden="true"
+                                        >
+                                            <Check className="h-3 w-3" />
+                                        </div>
                                         <Badge
                                             style={{
                                                 backgroundColor: qual.color_bg || '#e0e7ff',
@@ -212,7 +226,7 @@ export default function DoctorQualificationEditor({ doctorId, selectedQualIds = 
                                                 title="Zertifikat erforderlich"
                                             />
                                         )}
-                                    </button>
+                                    </div>
                                 );
                             })}
                         </div>
@@ -271,6 +285,7 @@ export function DoctorQualificationBadges({ doctorId, qualificationMap, allDocto
                 return (
                     <Badge
                         key={qualId}
+                        data-testid={`staff-doctor-qualification-${doctorId}-${qualId}`}
                         style={{ 
                             backgroundColor: qual.color_bg || '#e0e7ff', 
                             color: qual.color_text || '#3730a3' 

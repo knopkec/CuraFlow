@@ -5,16 +5,20 @@ export class AppShellPage {
   readonly sidebar: Locator;
   readonly openSidebarButton: Locator;
   readonly adminLink: Locator;
+  readonly staffLink: Locator;
   readonly schedulePage: Locator;
   readonly adminPage: Locator;
+  readonly staffPage: Locator;
 
   constructor(private readonly page: Page) {
     this.shell = page.getByTestId('app-shell');
     this.sidebar = page.getByTestId('app-sidebar');
     this.openSidebarButton = page.getByTestId('sidebar-open-button');
     this.adminLink = page.getByTestId('nav-link-admin');
+    this.staffLink = page.getByTestId('nav-link-staff');
     this.schedulePage = page.getByTestId('schedule-page');
     this.adminPage = page.getByTestId('admin-page');
+    this.staffPage = page.getByTestId('staff-page');
   }
 
   async expectReady() {
@@ -40,5 +44,12 @@ export class AppShellPage {
     await this.adminLink.click();
     await expect(this.page).toHaveURL(/\/admin(?:\?|$)/);
     await expect(this.adminPage).toBeVisible();
+  }
+
+  async gotoStaff() {
+    await this.ensureSidebarOpen();
+    await this.staffLink.click();
+    await expect(this.page).toHaveURL(/\/staff(?:\?|$)/);
+    await expect(this.staffPage).toBeVisible();
   }
 }

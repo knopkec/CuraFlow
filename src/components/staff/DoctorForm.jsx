@@ -175,18 +175,19 @@ export default function DoctorForm({ open, onOpenChange, doctor, onSubmit }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl lg:max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl lg:max-w-3xl max-h-[90vh] overflow-y-auto" data-testid="staff-doctor-form">
         <DialogHeader>
           <DialogTitle>{doctor ? "Teammitglied bearbeiten" : "Neues Teammitglied hinzufügen"}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="grid gap-4 py-4">
           <div className="grid gap-2">
             <Label htmlFor="name">Name</Label>
-            <Input
-              id="name"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              required
+              <Input
+                id="name"
+                data-testid="staff-form-name"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                required
             />
           </div>
           <div className="grid grid-cols-2 gap-4">
@@ -194,6 +195,7 @@ export default function DoctorForm({ open, onOpenChange, doctor, onSubmit }) {
               <Label htmlFor="initials">Kürzel</Label>
               <Input
                 id="initials"
+                data-testid="staff-form-initials"
                 value={formData.initials}
                 onChange={(e) => setFormData({ ...formData, initials: e.target.value })}
                 required
@@ -206,7 +208,7 @@ export default function DoctorForm({ open, onOpenChange, doctor, onSubmit }) {
                 value={formData.role}
                 onValueChange={(value) => setFormData({ ...formData, role: value })}
               >
-                <SelectTrigger>
+                <SelectTrigger data-testid="staff-form-role-trigger">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -224,6 +226,7 @@ export default function DoctorForm({ open, onOpenChange, doctor, onSubmit }) {
             <div className="flex gap-2">
               <Input
                 id="email"
+                data-testid="staff-form-email"
                 type="email"
                 value={formData.email || ''}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
@@ -244,11 +247,12 @@ export default function DoctorForm({ open, onOpenChange, doctor, onSubmit }) {
           </div>
           <div className="grid gap-2">
             <Label htmlFor="google_email">E-Mail (für Kalender / Dienstplan)</Label>
-            <Input
-              id="google_email"
-              type="email"
-              value={formData.google_email || ''}
-              onChange={(e) => setFormData({ ...formData, google_email: e.target.value })}
+              <Input
+                id="google_email"
+                data-testid="staff-form-google-email"
+                type="email"
+                value={formData.google_email || ''}
+                onChange={(e) => setFormData({ ...formData, google_email: e.target.value })}
               placeholder="name@klinik.de"
             />
           </div>
@@ -258,6 +262,7 @@ export default function DoctorForm({ open, onOpenChange, doctor, onSubmit }) {
                 <Label htmlFor="fte">Stellenanteil (1.0 = Vollzeit)</Label>
                 <Input
                     id="fte"
+                    data-testid="staff-form-fte"
                     type="number"
                     step="0.01"
                     min="0"
@@ -272,6 +277,7 @@ export default function DoctorForm({ open, onOpenChange, doctor, onSubmit }) {
                   <div>
                     <Input
                       id="target_weekly_hours"
+                      data-testid="staff-form-target-hours"
                       type="number"
                       value={(() => {
                         const emp = centralEmployees.find(e => e.id === formData.central_employee_id);
@@ -285,6 +291,7 @@ export default function DoctorForm({ open, onOpenChange, doctor, onSubmit }) {
                 ) : (
                   <Input
                     id="target_weekly_hours"
+                    data-testid="staff-form-target-hours"
                     type="number"
                     step="0.5"
                     min="0"
@@ -301,6 +308,7 @@ export default function DoctorForm({ open, onOpenChange, doctor, onSubmit }) {
                 <Label htmlFor="contract_end_date">Befristet bis (Optional)</Label>
                 <Input
                     id="contract_end_date"
+                    data-testid="staff-form-contract-end-date"
                     type="date"
                     value={formData.contract_end_date || ''}
                     onChange={(e) => setFormData({ ...formData, contract_end_date: e.target.value })}
@@ -371,7 +379,7 @@ export default function DoctorForm({ open, onOpenChange, doctor, onSubmit }) {
           </div>
 
           <DialogFooter>
-            <Button type="submit">Speichern</Button>
+            <Button type="submit" data-testid="staff-form-submit">Speichern</Button>
           </DialogFooter>
         </form>
       </DialogContent>
