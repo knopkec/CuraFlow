@@ -128,9 +128,9 @@ export default function StaffPage() {
     },
     onSuccess: () => {
       trackDbChange();
-      queryClient.invalidateQueries(["doctors"]);
-      queryClient.invalidateQueries(["doctorQualifications"]);
-      queryClient.invalidateQueries(["allDoctorQualifications"]);
+      queryClient.invalidateQueries({ queryKey: ["doctors"] });
+      queryClient.invalidateQueries({ queryKey: ["doctorQualifications"] });
+      queryClient.invalidateQueries({ queryKey: ["allDoctorQualifications"] });
       setIsFormOpen(false);
     },
     onError: (error) => {
@@ -142,7 +142,7 @@ export default function StaffPage() {
     mutationFn: ({ id, data }) => db.Doctor.update(id, data),
     onSuccess: () => {
       trackDbChange();
-      queryClient.invalidateQueries(["doctors"]);
+      queryClient.invalidateQueries({ queryKey: ["doctors"] });
       setIsFormOpen(false);
       setEditingDoctor(null);
     },
@@ -155,7 +155,7 @@ export default function StaffPage() {
     mutationFn: (id) => db.Doctor.delete(id),
     onSuccess: () => {
       trackDbChange();
-      queryClient.invalidateQueries(["doctors"]);
+      queryClient.invalidateQueries({ queryKey: ["doctors"] });
     },
   });
 
@@ -211,7 +211,7 @@ export default function StaffPage() {
   };
 
   return (
-    <div className="container mx-auto flex h-[calc(100dvh-5rem)] max-w-6xl flex-col overflow-hidden sm:h-[calc(100dvh-6rem)] lg:h-[calc(100dvh-8rem)]">
+    <div className="container mx-auto flex h-[calc(100dvh-5rem)] max-w-6xl flex-col overflow-hidden sm:h-[calc(100dvh-6rem)] lg:h-[calc(100dvh-8rem)]" data-testid="staff-page">
       <div className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-slate-900">Team</h1>
@@ -221,19 +221,19 @@ export default function StaffPage() {
           {!isReadOnly && <QualificationManagement />}
           {!isReadOnly && <TeamRoleSettings />}
           {!isReadOnly && (
-          <Button onClick={handleAddNew} className="bg-indigo-600 hover:bg-indigo-700">
-            <Plus className="w-4 h-4 mr-2" />
-            Teammitglied hinzufügen
-          </Button>
+            <Button onClick={handleAddNew} className="bg-indigo-600 hover:bg-indigo-700" data-testid="staff-add-button">
+              <Plus className="w-4 h-4 mr-2" />
+              Teammitglied hinzufügen
+            </Button>
           )}
         </div>
       </div>
 
       <Tabs defaultValue="list" className="flex min-h-0 flex-1 flex-col gap-6 overflow-hidden">
           <TabsList className="w-fit">
-              <TabsTrigger value="list">Mitarbeiterliste</TabsTrigger>
-              <TabsTrigger value="qualifications">Qualifikationen</TabsTrigger>
-              <TabsTrigger value="staffing">Stellenplan</TabsTrigger>
+              <TabsTrigger value="list" data-testid="staff-tab-list">Mitarbeiterliste</TabsTrigger>
+              <TabsTrigger value="qualifications" data-testid="staff-tab-qualifications">Qualifikationen</TabsTrigger>
+              <TabsTrigger value="staffing" data-testid="staff-tab-staffing">Stellenplan</TabsTrigger>
           </TabsList>
 
           <TabsContent value="list" className="mt-0 min-h-0 flex-1 overflow-hidden">
@@ -355,11 +355,12 @@ export default function StaffPage() {
                   <DragDropContext onDragEnd={handleDragEnd}>
                       <Droppable droppableId="doctors-list" direction="vertical">
                           {(provided) => (
-                              <div
-                                  {...provided.droppableProps}
-                                  ref={provided.innerRef}
-                                  className="grid grid-cols-1 gap-4"
-                              >
+                               <div
+                                   {...provided.droppableProps}
+                                   ref={provided.innerRef}
+                                   data-testid="staff-doctor-list"
+                                   className="grid grid-cols-1 gap-4"
+                               >
                                   {filteredDoctors.length === 0 && (
                                     <Card>
                                       <CardContent className="py-10 text-center text-sm text-slate-500">
@@ -370,19 +371,24 @@ export default function StaffPage() {
                                   {filteredDoctors.map((doctor, index) => (
                                       <Draggable key={doctor.id} draggableId={doctor.id} index={index} isDragDisabled={isReadOnly || selectedQualificationIds.length > 0}>
                                           {(provided, snapshot) => (
-                                              <div
-                                                  ref={provided.innerRef}
-                                                  {...provided.draggableProps}
-                                                  className={`transition-shadow ${snapshot.isDragging ? "z-50" : ""}`}
-                                              >
+                                               <div
+                                                   ref={provided.innerRef}
+                                                   {...provided.draggableProps}
+                                                   data-testid={`staff-doctor-card-${doctor.id}`}
+                                                   className={`transition-shadow ${snapshot.isDragging ? "z-50" : ""}`}
+                                               >
                                                   <Card className={`hover:shadow-md ${snapshot.isDragging ? "shadow-lg ring-2 ring-indigo-500" : ""}`}>
                                                       <CardContent className="flex items-center justify-between p-4">
                                                           <div className="flex flex-1 items-center gap-4">
                                                               {!isReadOnly && (
-                                                              <div {...provided.dragHandleProps} className="cursor-grab text-slate-400 hover:text-slate-600 active:cursor-grabbing">
-                                                                  <GripVertical className="h-5 w-5" />
-                                                              </div>
-                                                              )}
+                                                               <div
+                                                                   {...provided.dragHandleProps}
+                                                                   data-testid={`staff-doctor-drag-${doctor.id}`}
+                                                                   className="cursor-grab text-slate-400 hover:text-slate-600 active:cursor-grabbing"
+                                                               >
+                                                                   <GripVertical className="h-5 w-5" />
+                                                               </div>
+                                                               )}
                                                               <div
                                                                   className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-sm font-bold shadow-sm"
                                                                   style={getRoleColor(doctor.role)}
@@ -390,7 +396,7 @@ export default function StaffPage() {
                                                                   {doctor.initials || <User className="h-5 w-5 opacity-50" />}
                                                               </div>
                                                               <div className="flex-1">
-                                                                  <h3 className="font-semibold text-slate-900">{doctor.name}</h3>
+                                                                   <h3 className="font-semibold text-slate-900" data-testid={`staff-doctor-name-${doctor.id}`}>{doctor.name}</h3>
                                                                   <div className="mt-0.5 flex flex-wrap items-center gap-1">
                                                                       <Badge variant="secondary" className="text-xs font-normal">
                                                                           {doctor.role}
@@ -406,15 +412,26 @@ export default function StaffPage() {
                                                           <div className="flex space-x-1">
                                                               {!isReadOnly && (
                                                               <>
-                                                              <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-indigo-600" onClick={() => handleEdit(doctor)}>
-                                                                  <Pencil className="h-4 w-4" />
-                                                              </Button>
-                                                              <AlertDialog>
-                                                                  <AlertDialogTrigger asChild>
-                                                                      <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-red-600">
-                                                                          <Trash2 className="h-4 w-4" />
-                                                                      </Button>
-                                                                  </AlertDialogTrigger>
+                                                               <Button
+                                                                   variant="ghost"
+                                                                   size="icon"
+                                                                   className="h-8 w-8 text-slate-400 hover:text-indigo-600"
+                                                                   onClick={() => handleEdit(doctor)}
+                                                                   data-testid={`staff-doctor-edit-${doctor.id}`}
+                                                               >
+                                                                   <Pencil className="h-4 w-4" />
+                                                               </Button>
+                                                               <AlertDialog>
+                                                                   <AlertDialogTrigger asChild>
+                                                                       <Button
+                                                                           variant="ghost"
+                                                                           size="icon"
+                                                                           className="h-8 w-8 text-slate-400 hover:text-red-600"
+                                                                           data-testid={`staff-doctor-delete-${doctor.id}`}
+                                                                       >
+                                                                           <Trash2 className="h-4 w-4" />
+                                                                       </Button>
+                                                                   </AlertDialogTrigger>
                                                                   <AlertDialogContent>
                                                                       <AlertDialogHeader>
                                                                           <AlertDialogTitle>Sind Sie sicher?</AlertDialogTitle>
@@ -424,10 +441,14 @@ export default function StaffPage() {
                                                                       </AlertDialogHeader>
                                                                       <AlertDialogFooter>
                                                                           <AlertDialogCancel>Abbrechen</AlertDialogCancel>
-                                                                          <AlertDialogAction onClick={() => deleteMutation.mutate(doctor.id)} className="bg-red-600 hover:bg-red-700">
-                                                                              Löschen
-                                                                          </AlertDialogAction>
-                                                                      </AlertDialogFooter>
+                                                                           <AlertDialogAction
+                                                                               onClick={() => deleteMutation.mutate(doctor.id)}
+                                                                               className="bg-red-600 hover:bg-red-700"
+                                                                               data-testid={`staff-doctor-delete-confirm-${doctor.id}`}
+                                                                           >
+                                                                               Löschen
+                                                                           </AlertDialogAction>
+                                                                       </AlertDialogFooter>
                                                                   </AlertDialogContent>
                                                               </AlertDialog>
                                                               </>
