@@ -827,6 +827,12 @@ router.get('/timeslot-migration-status', async (req, res, next) => {
         description: 'Verfügbarkeitsrelevanz pro Arbeitsplatz (z.B. Demo Chirurgie = nicht relevant)',
         applied: columnNames.includes('affects_availability')
       });
+
+      migrations.push({
+        name: 'add_workplace_allows_absence_overlap',
+        description: 'Erlaubt dienstspezifische Überschneidungen mit Abwesenheiten',
+        applied: columnNames.includes('allows_absence_overlap')
+      });
     } catch (err) {
       migrations.push({
         name: 'workplace_columns',

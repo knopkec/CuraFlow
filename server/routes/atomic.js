@@ -29,7 +29,7 @@ const fromSqlRow = (row) => {
   const boolFields = [
     'receive_email_notifications', 'exclude_from_staffing_plan', 
     'user_viewed', 'auto_off', 'show_in_service_plan', 
-    'allows_rotation_concurrently', 
+    'allows_rotation_concurrently', 'allows_absence_overlap',
     'acknowledged', 'is_active'
   ];
   for (const key in res) {

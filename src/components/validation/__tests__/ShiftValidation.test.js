@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createShiftValidator } from '../ShiftValidation';
 
-function createValidator(systemSettings = []) {
+function createValidator(workplaces = []) {
   return createShiftValidator({
     doctors: [{ id: 'doctor-1', role: 'Facharzt', fte: 1 }],
     shifts: [
@@ -12,9 +12,9 @@ function createValidator(systemSettings = []) {
         position: 'Frei',
       },
     ],
-    workplaces: [],
+    workplaces,
     wishes: [],
-    systemSettings,
+    systemSettings: [],
     staffingEntries: [],
     timeslots: [],
     qualificationMap: {},
@@ -25,7 +25,9 @@ function createValidator(systemSettings = []) {
 
 describe('ShiftValidator absence overlap setting', () => {
   it('blocks overlapping absence and duty by default', () => {
-    const validator = createValidator();
+    const validator = createValidator([
+      { id: 'workplace-1', name: 'Bereitschaftsdienst', category: 'Dienste' },
+    ]);
 
     const result = validator.validate('doctor-1', '2026-05-19', 'Bereitschaftsdienst');
 
@@ -33,9 +35,9 @@ describe('ShiftValidator absence overlap setting', () => {
     expect(result.blockers).toContain('Mitarbeiter ist bereits als "Frei" eingetragen (blockiert).');
   });
 
-  it('allows overlapping absence and duty when the setting is enabled', () => {
+  it('allows overlapping absence and duty when the workplace setting is enabled', () => {
     const validator = createValidator([
-      { key: 'allow_absence_oncall_overlap', value: 'true' },
+      { id: 'workplace-1', name: 'Bereitschaftsdienst', category: 'Dienste', allows_absence_overlap: true },
     ]);
 
     const result = validator.validate('doctor-1', '2026-05-19', 'Bereitschaftsdienst');

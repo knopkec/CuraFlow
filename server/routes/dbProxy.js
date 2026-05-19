@@ -52,7 +52,7 @@ const fromSqlRow = (row) => {
     const boolFields = [
       'receive_email_notifications', 'exclude_from_staffing_plan', 
       'user_viewed', 'auto_off', 'show_in_service_plan', 
-      'allows_rotation_concurrently', 
+      'allows_rotation_concurrently', 'allows_absence_overlap',
       'acknowledged', 'is_active', 'is_specialist',
       'timeslots_enabled', 'spans_midnight', 'affects_availability',
       'can_do_foreground_duty', 'can_do_background_duty', 'excluded_from_statistics',

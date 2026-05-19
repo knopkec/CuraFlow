@@ -40,7 +40,6 @@ export default function AdminSettings() {
 
     const wishDeadlineMonths = settings.find(s => s.key === 'wish_deadline_months')?.value || '';
     const wishReminderEnabled = settings.find(s => s.key === 'wish_reminder_email_enabled')?.value === 'true';
-    const allowAbsenceOncallOverlap = settings.find(s => s.key === 'allow_absence_oncall_overlap')?.value === 'true';
     
     // Approval Settings
     const approvalSettingRaw = settings.find(s => s.key === 'wish_approval_rules')?.value;
@@ -119,25 +118,6 @@ export default function AdminSettings() {
                             </div>
                         )}
 
-                        <div className="flex items-start gap-3 pt-3 mt-3 border-t border-slate-200">
-                            <Checkbox
-                                id="allow-absence-oncall-overlap"
-                                checked={allowAbsenceOncallOverlap}
-                                onCheckedChange={(checked) => updateSettingMutation.mutate({
-                                    key: 'allow_absence_oncall_overlap',
-                                    value: checked ? 'true' : 'false'
-                                })}
-                                className="mt-0.5"
-                            />
-                            <div className="space-y-1">
-                                <Label htmlFor="allow-absence-oncall-overlap" className="cursor-pointer text-slate-900">
-                                    Gleichzeitige Abwesenheit und Dienst erlauben
-                                </Label>
-                                <p className="text-xs text-slate-500">
-                                    Erlaubt global Überschneidungen zwischen Abwesenheiten und Diensten. Standardmäßig deaktiviert.
-                                </p>
-                            </div>
-                        </div>
                     </div>
                 </div>
             </div>

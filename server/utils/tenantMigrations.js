@@ -125,6 +125,10 @@ export async function runTenantMigrations(dbPool, cacheKey = 'default') {
   await addCol('add_workplace_affects_availability',
     `ALTER TABLE Workplace ADD COLUMN affects_availability BOOLEAN DEFAULT TRUE`);
 
+  // ── 9b. Workplace allows_absence_overlap ──
+  await addCol('add_workplace_allows_absence_overlap',
+    `ALTER TABLE Workplace ADD COLUMN allows_absence_overlap BOOLEAN DEFAULT FALSE`);
+
   // ── 10. Workplace staffing ──
   await addCol('add_workplace_min_staff',
     `ALTER TABLE Workplace ADD COLUMN min_staff INT DEFAULT 1`);

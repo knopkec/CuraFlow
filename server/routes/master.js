@@ -213,6 +213,7 @@ async function syncTimeAccountsForEmployee(adminUserId, employee, assignments) {
           if (workplaceColNames.has('work_time_percentage')) workplaceSelectCols.push('work_time_percentage');
           if (workplaceColNames.has('service_type')) workplaceSelectCols.push('service_type');
           if (workplaceColNames.has('affects_availability')) workplaceSelectCols.push('affects_availability');
+          if (workplaceColNames.has('allows_absence_overlap')) workplaceSelectCols.push('allows_absence_overlap');
 
           const [wp] = await pool.execute(`SELECT ${workplaceSelectCols.join(', ')} FROM Workplace`);
           workplaces = wp;

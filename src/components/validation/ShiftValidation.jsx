@@ -42,7 +42,6 @@ export class ShiftValidator {
         this._customCategories = getWorkplaceCategoriesFromSettings(this.systemSettings);
         
         // Parse settings
-        this.allowAbsenceOncallOverlap = this.systemSettings.find(s => s.key === 'allow_absence_oncall_overlap')?.value === 'true';
         this.absenceBlockingRules = this._parseAbsenceRules();
         this.limits = this._parseLimits();
         this.staffingMinimums = this._parseStaffingMinimums();
@@ -367,9 +366,8 @@ export class ShiftValidator {
     }
 
     _checkAbsenceConflicts(doctorId, dateStr, newPosition, excludeShiftId) {
-        // On-call shifts are not explicitly identifiable in the current model,
-        // so this setting bypasses absence blocking globally when enabled.
-        if (this.allowAbsenceOncallOverlap) {
+        const newWorkplace = this.workplaces.find(w => w.name === newPosition);
+        if (newWorkplace?.allows_absence_overlap === true) {
             return {};
         }
 

@@ -433,8 +433,20 @@ export default function WorkplaceConfigDialog({ defaultTab = "Rotationen" }) {
                                                                                     checked={editForm.allows_rotation_concurrently || false}
                                                                                     onCheckedChange={(checked) => setEditForm({...editForm, allows_rotation_concurrently: checked})}
                                                                                 />
+                                                                            </div>
+                                                                            <div className="flex items-center justify-between p-3 border rounded bg-slate-50">
+                                                                                <div className="space-y-0.5">
+                                                                                    <Label className="text-base">Gleichzeitige Abwesenheit erlauben</Label>
+                                                                                    <div className="text-xs text-slate-500">
+                                                                                        Dieser Dienst darf trotz bestehender Abwesenheit am selben Tag zugewiesen werden.
+                                                                                    </div>
                                                                                 </div>
-                                                                                <div className="p-3 border rounded bg-slate-50 space-y-2">
+                                                                                <Switch
+                                                                                    checked={editForm.allows_absence_overlap || false}
+                                                                                    onCheckedChange={(checked) => setEditForm({...editForm, allows_absence_overlap: checked})}
+                                                                                />
+                                                                            </div>
+                                                                            <div className="p-3 border rounded bg-slate-50 space-y-2">
                                                                                 <div className="space-y-0.5">
                                                                                     <Label className="text-base">Aufeinanderfolgende Tage</Label>
                                                                                     <div className="text-xs text-slate-500">
@@ -739,6 +751,7 @@ export default function WorkplaceConfigDialog({ defaultTab = "Rotationen" }) {
                                                                                 {item.service_type && (() => { const st = SERVICE_TYPES.find(t => t.value === item.service_type); return st ? <Badge variant="secondary" className={`text-[10px] font-normal ${st.color}`}>{st.label}</Badge> : null; })()}
                                                                                 {item.auto_off && <Badge variant="secondary" className="text-[10px] font-normal bg-blue-100 text-blue-700">Auto-Frei</Badge>}
                                                                                 {item.allows_rotation_concurrently && <Badge variant="secondary" className="text-[10px] font-normal bg-green-100 text-green-700">Rotation OK</Badge>}
+                                                                                {item.allows_absence_overlap && <Badge variant="secondary" className="text-[10px] font-normal bg-violet-100 text-violet-700">Abwesenheit OK</Badge>}
                                                                                 {item.allows_multiple && <Badge variant="secondary" className="text-[10px] font-normal bg-teal-100 text-teal-700">Mehrfachbesetzung</Badge>}
                                                                                 {item.allows_multiple && (item.min_staff > 0 || item.optimal_staff > 1) && (
                                                                                     <Badge variant="secondary" className="text-[10px] font-normal bg-amber-100 text-amber-700">

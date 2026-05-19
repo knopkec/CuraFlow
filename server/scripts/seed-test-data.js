@@ -259,6 +259,7 @@ async function ensureTenantBaseTables(tenantPool) {
       work_time_percentage DECIMAL(5,2) DEFAULT 100.00,
       service_type INT DEFAULT NULL,
       affects_availability TINYINT(1) DEFAULT 1,
+      allows_absence_overlap TINYINT(1) DEFAULT 0,
       min_staff INT DEFAULT 1,
       optimal_staff INT DEFAULT 1,
       consecutive_days_mode VARCHAR(20) DEFAULT 'allowed',
@@ -559,7 +560,7 @@ async function seedTenantData(tenantPool) {
   await upsertRows(
     tenantPool,
     'Workplace',
-    ['id', 'name', 'category', 'order', 'is_active', 'allows_multiple', 'service_type', 'min_staff', 'optimal_staff'],
+    ['id', 'name', 'category', 'order', 'is_active', 'allows_multiple', 'service_type', 'allows_absence_overlap', 'min_staff', 'optimal_staff'],
     workplaces
   );
 
