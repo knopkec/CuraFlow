@@ -190,6 +190,27 @@ This application runs in hospital environments. Security failures can have regul
 
 - Write **atomic commits** — each commit represents one logical change that passes linting and tests.
 - Commit messages follow Conventional Commits: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`.
+- When reviewing **external pull requests for merge safety**, prioritize **production database safety over feature value or test coverage**.
+- For merge-safety reviews, assume the operator can recover Git history but **cannot safely recover production database corruption**.
+- Treat an external PR as **high risk / do not recommend merge without manual review** if it touches any of these paths or concerns:
+  - `server/`
+  - `server/migrations/`
+  - `server/scripts/`
+  - `server/routes/`
+  - `server/utils/`
+  - `functions/`
+  - deployment files such as `Dockerfile.coolify`, `server/nixpacks.toml`, Railway/Coolify configs, compose files, or startup entrypoints
+  - `package.json` scripts or lifecycle hooks related to `start`, `build`, `postinstall`, `prestart`, `test:e2e`, `seed`, or `migrate`
+- Treat PRs as **lower risk** when they are limited to frontend UI/test/workflow files such as `src/`, `e2e/`, and `.github/workflows/`, and do not alter runtime server or deployment behavior.
+- During merge-safety analysis, explicitly check for any possibility of:
+  - automatic seeds or fixture loading in runtime paths
+  - unintended migrations or schema changes during deploy/startup
+  - test harness code that could target non-local or production services
+  - background jobs, scripts, or hooks that write to the database outside normal user actions
+- In merge recommendations, clearly separate:
+  - **deploy/runtime risk** to production databases
+  - **test-only risk** that is isolated from deployment
+  - **process risk** caused by misconfiguration (for example, tests pointed at production URLs)
 - Before considering work complete, verify:
   - `npm run lint` passes (in project root)
   - `npm run build` succeeds
