@@ -58,14 +58,25 @@ export class SchedulePage {
     return this.page.getByTestId(`schedule-day-clear-${date}`);
   }
 
-  rowHeader(rowName: string, timeslotId?: string | null) {
+  rowTargetId(rowName: string, timeslotId?: string | null) {
     const rawHeaderId = timeslotId ? `rowHeader__${rowName}__${timeslotId}` : `rowHeader__${rowName}`;
-    return this.page.getByTestId(`schedule-row-header-${encodeURIComponent(rawHeaderId)}`);
+    return encodeURIComponent(rawHeaderId);
+  }
+
+  rowHeader(rowName: string, timeslotId?: string | null) {
+    return this.page.getByTestId(`schedule-row-header-${this.rowTargetId(rowName, timeslotId)}`);
   }
 
   rowClearButton(rowName: string, timeslotId?: string | null) {
-    const rawHeaderId = timeslotId ? `rowHeader__${rowName}__${timeslotId}` : `rowHeader__${rowName}`;
-    return this.page.getByTestId(`schedule-row-clear-${encodeURIComponent(rawHeaderId)}`);
+    return this.page.getByTestId(`schedule-row-clear-${this.rowTargetId(rowName, timeslotId)}`);
+  }
+
+  groupRowHeader(rowName: string) {
+    return this.rowHeader(rowName, 'allTimeslots');
+  }
+
+  groupRowClearButton(rowName: string) {
+    return this.rowClearButton(rowName, 'allTimeslots');
   }
 
   async openMonthView() {

@@ -83,6 +83,7 @@ const SECTION_TABS_KEY = 'schedule_section_tabs';
 const PINNED_SECTION_TITLE = 'Anwesenheiten';
 const SPLIT_PANEL_PREFIX = 'split::';
 const SPLIT_DRAG_PREFIX = 'split-';
+const SCHEDULE_BACKGROUND_FETCH_LIMIT = 50000;
 
 const withPanelPrefix = (id, prefix = '') => `${prefix}${id}`;
 const stripPanelPrefix = (id = '') => (id.startsWith(SPLIT_PANEL_PREFIX) ? id.slice(SPLIT_PANEL_PREFIX.length) : id);
@@ -990,7 +991,7 @@ export default function ScheduleBoard() {
       const visibleEnd = format(addDays(new Date(`${fetchRange.end}T00:00:00`), 370), 'yyyy-MM-dd');
       const visibleStartMonth = visibleStart.slice(0, 7);
       const visibleEndMonth = visibleEnd.slice(0, 7);
-      const fetchedWishes = await db.WishRequest.list({ limit: 5000, sort: '-target_month' });
+      const fetchedWishes = await db.WishRequest.list({ limit: SCHEDULE_BACKGROUND_FETCH_LIMIT, sort: '-target_month' });
 
       return fetchedWishes.filter((wish) => {
         const wishStart = getWishStartDate(wish);
@@ -1055,7 +1056,7 @@ export default function ScheduleBoard() {
   const { data: staffingPlanEntries = [] } = useQuery({
     queryKey: ['staffingPlanEntries', staffingYear],
     queryFn: async () => {
-      const fetchedEntries = await db.StaffingPlanEntry.list({ limit: 5000 });
+      const fetchedEntries = await db.StaffingPlanEntry.list({ limit: SCHEDULE_BACKGROUND_FETCH_LIMIT });
 
       return fetchedEntries.filter((entry) => {
         if (entry.year !== undefined && entry.year !== null) {

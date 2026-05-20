@@ -16,6 +16,18 @@ describe('getWishStartDate', () => {
     expect(getWishStartDate({ date: '2024-03-10' })).toBe('2024-03-10');
   });
 
+  it('falls back to start_date before date', () => {
+    expect(getWishStartDate({ start_date: '2024-03-08', date: '2024-03-10' })).toBe('2024-03-08');
+  });
+
+  it('prefers range_start over start_date and date', () => {
+    expect(getWishStartDate({
+      range_start: '2024-03-01',
+      start_date: '2024-03-08',
+      date: '2024-03-10',
+    })).toBe('2024-03-01');
+  });
+
   it('returns null for empty wish', () => {
     expect(getWishStartDate({})).toBe(null);
     expect(getWishStartDate(null)).toBe(null);
@@ -31,8 +43,26 @@ describe('getWishEndDate', () => {
     expect(getWishEndDate({ date: '2024-03-10' })).toBe('2024-03-10');
   });
 
+  it('falls back to end_date before date', () => {
+    expect(getWishEndDate({ end_date: '2024-03-12', date: '2024-03-10' })).toBe('2024-03-12');
+  });
+
   it('falls back to range_start if date also absent', () => {
     expect(getWishEndDate({ range_start: '2024-03-10' })).toBe('2024-03-10');
+  });
+
+  it('falls back to start_date when end_date and date are absent', () => {
+    expect(getWishEndDate({ start_date: '2024-03-09' })).toBe('2024-03-09');
+  });
+
+  it('prefers range_end over end_date, date, start_date, and range_start', () => {
+    expect(getWishEndDate({
+      range_end: '2024-03-15',
+      end_date: '2024-03-12',
+      date: '2024-03-10',
+      start_date: '2024-03-08',
+      range_start: '2024-03-01',
+    })).toBe('2024-03-15');
   });
 
   it('returns null for empty wish', () => {
