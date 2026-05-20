@@ -3,6 +3,7 @@ import path from 'node:path';
 
 const coverageRoot = path.resolve(process.cwd(), 'coverage');
 const githubStepSummaryPath = process.env.GITHUB_STEP_SUMMARY;
+const coverageSummaryPath = path.resolve(coverageRoot, 'coverage-summary.json');
 
 function writeOutput(text) {
   if (githubStepSummaryPath) {
@@ -25,27 +26,56 @@ function thresholdStatus(value, threshold) {
   return value >= threshold ? 'meets target' : 'below target';
 }
 
-function parseLinePercentFromHtml(html) {
-  const match = html.match(/<span class="strong">([0-9.]+)%\s*<\/span>\s*<span class="quiet">Lines<\/span>/);
-  return match ? Number.parseFloat(match[1]) : null;
-}
-
-function readLinePercent(relativeHtmlPath) {
-  const absolutePath = path.resolve(coverageRoot, relativeHtmlPath);
-
-  if (!fs.existsSync(absolutePath)) {
+function readCoverageSummary() {
+  if (!fs.existsSync(coverageSummaryPath)) {
     return null;
   }
 
-  return parseLinePercentFromHtml(fs.readFileSync(absolutePath, 'utf8'));
+  return JSON.parse(fs.readFileSync(coverageSummaryPath, 'utf8'));
 }
 
-if (!fs.existsSync(path.resolve(coverageRoot, 'index.html'))) {
-  writeOutput('## Coverage advisory\n\nNo HTML coverage report was generated in `coverage/`.\n');
+function findCoverageEntry(summary, filePath) {
+  const normalizedPath = filePath.replaceAll(path.sep, '/');
+  const summaryEntries = Object.entries(summary).filter(([entryPath]) => entryPath !== 'total');
+  const directMatch = summary[normalizedPath];
+
+  if (directMatch) {
+    return directMatch;
+  }
+
+  const suffixMatch = summaryEntries.find(([entryPath]) => entryPath.endsWith(normalizedPath));
+  return suffixMatch ? suffixMatch[1] : null;
+}
+
+function findHtmlCoverageReportPath() {
+  const candidates = [
+    path.resolve(coverageRoot, 'index.html'),
+    path.resolve(coverageRoot, 'lcov-report', 'index.html'),
+  ];
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
+}
+
+function readLinePercent(summary, filePath) {
+  if (!summary) {
+    return null;
+  }
+
+  const coverageEntry = findCoverageEntry(summary, filePath);
+  return typeof coverageEntry?.lines?.pct === 'number' ? coverageEntry.lines.pct : null;
+}
+
+const coverageSummary = readCoverageSummary();
+const htmlCoverageReportPath = findHtmlCoverageReportPath();
+
+if (!coverageSummary) {
+  writeOutput('## Coverage advisory\n\nNo `coverage-summary.json` report was generated in `coverage/`.\n');
   process.exit(0);
 }
 
-const totalLines = readLinePercent('index.html');
+const totalLines = typeof coverageSummary.total?.lines?.pct === 'number'
+  ? coverageSummary.total.lines.pct
+  : null;
 
 const criticalFiles = [
   {
@@ -71,9 +101,13 @@ const criticalFiles = [
 ];
 
 const criticalRows = criticalFiles.map((file) => {
-  const linesPct = readLinePercent(`${file.path}.html`);
+  const linesPct = readLinePercent(coverageSummary, file.path);
   return `| ${file.label} | \`${file.path}\` | ${formatPercent(linesPct)} | ${file.target}% | ${thresholdStatus(linesPct, file.target)} |`;
 });
+
+const htmlCoverageLocation = htmlCoverageReportPath
+  ? `\`${path.relative(process.cwd(), htmlCoverageReportPath).replaceAll(path.sep, '/')}\``
+  : 'the uploaded HTML coverage artifact';
 
 writeOutput(`## Coverage advisory
 
@@ -98,5 +132,5 @@ ${criticalRows.join('\n')}
 
 - New or meaningfully changed code should target **>= 80% line coverage**
 - Critical paths should target **>= 95% line coverage**
-- Use the HTML coverage artifact for file-level inspection when the summary shows a gap
+- Use ${htmlCoverageLocation} for file-level inspection when the summary shows a gap
 `);

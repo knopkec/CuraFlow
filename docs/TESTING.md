@@ -16,7 +16,7 @@ CuraFlow ships with automated **unit**, **component**, and **headless end-to-end
 | --- | --- |
 | `npm run test:unit` | Runs the Vitest unit project |
 | `npm run test:component` | Runs the component project in `happy-dom` |
-| `npm run test:coverage` | Runs unit + component coverage and writes the HTML report to `coverage/` |
+| `npm run test:coverage` | Runs unit + component coverage and writes the HTML report to `coverage/index.html` |
 | `npm run test:e2e` | Runs the Playwright suite against the deterministic Docker-backed harness |
 | `npm run test:e2e:repeat` | Re-runs the Playwright suite with `--repeat-each=2` for flake detection |
 | `npm run test:e2e:ui` | Opens Playwright UI mode locally |
