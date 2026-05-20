@@ -39,6 +39,7 @@ export default function DraggableDoctor({ doctor, index, style, isDragDisabled, 
             ref={provided.innerRef}
             {...provided.draggableProps}
             {...(isCompact ? provided.dragHandleProps : {})}
+            data-testid={`schedule-sidebar-doctor-${doctor.id}`}
             className={containerClass}
             style={containerStyle}
           >
@@ -57,6 +58,7 @@ export default function DraggableDoctor({ doctor, index, style, isDragDisabled, 
               <>
                 <div 
                   {...provided.dragHandleProps}
+                  data-testid={`schedule-sidebar-doctor-handle-${doctor.id}`}
                   className={`flex-shrink-0 font-bold text-xs h-full py-2 bg-white/50 rounded-l-md flex items-center justify-center cursor-grab active:cursor-grabbing hover:bg-black/10 transition-colors ${isCompactMode ? 'w-11' : 'w-10'}`}
                   title="Ziehen zum Verschieben"
                 >
