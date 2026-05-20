@@ -19,7 +19,7 @@ const unitProject = defineProject({
       provider: 'v8',
       include: ['src/utils/**', 'src/components/schedule/costFunction.js', 'src/components/schedule/staffingUtils.jsx'],
       exclude: ['src/**/__tests__/**', 'src/**/__component_tests__/**', '**/*.test.*'],
-      reporter: ['text', 'lcov'],
+      reporter: ['text', 'lcov', 'json-summary'],
     },
   },
 })

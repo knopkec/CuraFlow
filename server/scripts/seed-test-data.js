@@ -49,12 +49,12 @@ const doctors = [
 ];
 
 const workplaces = [
-  ['workplace-foreground', 'Dienst Vordergrund', 'Dienste', 1, true, false, 1, 1, 1],
-  ['workplace-background', 'Dienst Hintergrund', 'Dienste', 2, true, false, 2, 1, 1],
-  ['workplace-ct', 'CT', 'Dienste', 3, true, false, 2, 1, 2],
-  ['workplace-mrt', 'MRT Rotation', 'Rotationen', 4, true, true, null, 1, 1],
-  ['workplace-sono', 'Sono Rotation', 'Rotationen', 5, true, true, null, 1, 1],
-  ['workplace-demo', 'Demo / Konsil', 'Demonstrationen & Konsile', 6, true, true, null, 1, 1],
+  ['workplace-foreground', 'Dienst Vordergrund', 'Dienste', 1, true, false, 1, false, 1, 1],
+  ['workplace-background', 'Dienst Hintergrund', 'Dienste', 2, true, false, 2, false, 1, 1],
+  ['workplace-ct', 'CT', 'Dienste', 3, true, false, 2, false, 1, 2],
+  ['workplace-mrt', 'MRT Rotation', 'Rotationen', 4, true, true, null, false, 1, 1],
+  ['workplace-sono', 'Sono Rotation', 'Rotationen', 5, true, true, null, false, 1, 1],
+  ['workplace-demo', 'Demo / Konsil', 'Demonstrationen & Konsile', 6, true, true, null, false, 1, 1],
 ];
 
 const qualifications = [
