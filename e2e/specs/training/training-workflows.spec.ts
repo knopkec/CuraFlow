@@ -1,4 +1,4 @@
-import { addDays, format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import type { Page } from '@playwright/test';
 
 import { expect, test } from '../../fixtures/auth';
@@ -8,7 +8,7 @@ import {
   getAuthHeaders,
   type DbAuthHeaders,
 } from '../../support/api';
-import { storageStatePaths } from '../../support/config';
+import { seededSchedule, storageStatePaths } from '../../support/config';
 
 type TrainingRotation = {
   id: string;
@@ -39,12 +39,19 @@ function assertNoPageErrors(pageErrors: string[]) {
   }
 }
 
-function getNextBusinessDayAfter(date: Date) {
-  const candidate = addDays(new Date(date), 1);
-  while (candidate.getDay() === 0 || candidate.getDay() === 6) {
-    candidate.setDate(candidate.getDate() + 1);
+function getLastBusinessDaysOfMonth(month: string, count: number) {
+  const dates: Date[] = [];
+  const cursor = parseISO(`${month}-01`);
+  cursor.setMonth(cursor.getMonth() + 1, 0);
+
+  while (dates.length < count) {
+    if (cursor.getDay() !== 0 && cursor.getDay() !== 6) {
+      dates.unshift(new Date(cursor));
+    }
+    cursor.setDate(cursor.getDate() - 1);
   }
-  return candidate;
+
+  return dates;
 }
 
 async function deleteMatchingRotations(
@@ -97,12 +104,10 @@ test.describe('training workflows', () => {
 
     const doctorId = 'doctor-clara';
     const modality = 'Sono Rotation';
-    const startDate = new Date();
-    const transferDate = getNextBusinessDayAfter(startDate);
+    const [startDate, transferDate] = getLastBusinessDaysOfMonth(seededSchedule.targetMonth, 2);
     const startDateString = format(startDate, 'yyyy-MM-dd');
     const transferDateString = format(transferDate, 'yyyy-MM-dd');
-    const usesFromDateTransfer = startDate.getDay() === 0 || startDate.getDay() === 6;
-    const expectedShiftDate = usesFromDateTransfer ? transferDateString : startDateString;
+    const expectedShiftDate = startDateString;
     const pageErrors = capturePageErrors(page);
 
     let authHeaders: DbAuthHeaders | null = null;
@@ -113,6 +118,7 @@ test.describe('training workflows', () => {
 
       await deleteMatchingRotations(request, authHeaders, doctorId, startDateString, transferDateString, modality);
       await deleteMatchingShift(request, authHeaders, doctorId, expectedShiftDate, modality);
+      await deleteMatchingShift(request, authHeaders, doctorId, transferDateString, modality);
 
       await trainingPage.setDisplayedYear(startDate.getFullYear());
       await trainingPage.selectDoctor(doctorId);
@@ -134,14 +140,11 @@ test.describe('training workflows', () => {
         .toBe(true);
 
       await trainingPage.openTransferDialog();
-      if (usesFromDateTransfer) {
-        await trainingPage.chooseTransferMode('from-date');
-      }
-
+      await trainingPage.chooseTransferMode('from-date');
       await expect(trainingPage.transferPreviewButton).toHaveText(/\([1-9]/);
       await trainingPage.showTransferPreview();
-      await expect(trainingPage.transferDialog.getByText(modality, { exact: true })).toBeVisible();
-      await expect(trainingPage.transferDialog.getByText('Clara Conrad', { exact: true })).toBeVisible();
+      await expect(trainingPage.transferDialog.getByText(modality, { exact: true }).first()).toBeVisible();
+      await expect(trainingPage.transferDialog.getByText('Clara Conrad', { exact: true }).first()).toBeVisible();
       await expect(trainingPage.transferConfirmButton).toBeVisible();
       await trainingPage.confirmTransfer();
 
@@ -161,6 +164,7 @@ test.describe('training workflows', () => {
     } finally {
       if (authHeaders) {
         await deleteMatchingShift(request, authHeaders, doctorId, expectedShiftDate, modality);
+        await deleteMatchingShift(request, authHeaders, doctorId, transferDateString, modality);
         await deleteMatchingRotations(request, authHeaders, doctorId, startDateString, transferDateString, modality);
       }
     }

@@ -1,4 +1,4 @@
-import { addDays, format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import type { Page } from '@playwright/test';
 
 import { expect, test } from '../../fixtures/auth';
@@ -9,7 +9,7 @@ import {
   getAuthHeaders,
   type DbAuthHeaders,
 } from '../../support/api';
-import { storageStatePaths } from '../../support/config';
+import { seededSchedule, storageStatePaths } from '../../support/config';
 
 type ShiftEntry = {
   id: string;
@@ -60,7 +60,7 @@ test.describe('vacation workflows', () => {
     test.skip(browserName !== 'chromium', 'This flow mutates shared seeded vacation state across browser projects.');
 
     const doctorId = 'doctor-anna';
-    const date = addDays(new Date(), 2);
+    const date = parseISO(`${seededSchedule.targetMonth}-08`);
     const dateString = format(date, 'yyyy-MM-dd');
     const pageErrors = capturePageErrors(page);
 

@@ -1,4 +1,4 @@
-import { addMonths, format, startOfMonth } from 'date-fns';
+import { addMonths, format, parseISO, startOfMonth } from 'date-fns';
 import type { BrowserContext, Page } from '@playwright/test';
 
 import { expect, test } from '../../fixtures/auth';
@@ -10,7 +10,7 @@ import {
   getAuthHeaders,
   type DbAuthHeaders,
 } from '../../support/api';
-import { storageStatePaths } from '../../support/config';
+import { seededSchedule, storageStatePaths } from '../../support/config';
 
 type SystemSetting = {
   id: string;
@@ -89,7 +89,7 @@ test.describe('wishlist workflows', () => {
 
     const doctorId = 'doctor-clara';
     const position = 'Dienst Vordergrund';
-    const wishDate = startOfMonth(addMonths(new Date(), 1));
+    const wishDate = startOfMonth(addMonths(parseISO(`${seededSchedule.targetMonth}-01`), 1));
     const wishDateString = format(wishDate, 'yyyy-MM-dd');
 
     let adminContext: BrowserContext | null = null;
