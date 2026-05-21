@@ -334,18 +334,18 @@ export default function VacationPage() {
         return response.data;
     },
     onSuccess: () => {
-        queryClient.invalidateQueries(['shifts', selectedYear]);
+        queryClient.invalidateQueries({ queryKey: ['shifts', selectedYear] });
     },
     onError: (err) => {
         toast.error("Konflikt: " + (err.response?.data?.message || err.message));
-        queryClient.invalidateQueries(['shifts', selectedYear]);
+        queryClient.invalidateQueries({ queryKey: ['shifts', selectedYear] });
     }
   });
 
   const deleteShiftMutation = useMutation({
     mutationFn: (id) => db.ShiftEntry.delete(id),
     onSuccess: () => {
-        queryClient.invalidateQueries(['shifts', selectedYear]);
+        queryClient.invalidateQueries({ queryKey: ['shifts', selectedYear] });
     },
   });
 
@@ -363,7 +363,7 @@ export default function VacationPage() {
   const bulkCreateShiftMutation = useMutation({
     mutationFn: (data) => db.ShiftEntry.bulkCreate(data),
     onSuccess: () => {
-        queryClient.invalidateQueries(['shifts', selectedYear]);
+        queryClient.invalidateQueries({ queryKey: ['shifts', selectedYear] });
     },
   });
 
@@ -372,7 +372,7 @@ export default function VacationPage() {
         await Promise.all(ids.map(id => db.ShiftEntry.delete(id)));
     },
     onSuccess: () => {
-        queryClient.invalidateQueries(['shifts', selectedYear]);
+        queryClient.invalidateQueries({ queryKey: ['shifts', selectedYear] });
     },
   });
 
@@ -594,10 +594,10 @@ export default function VacationPage() {
              data: { position: activeType },
              check: { updated_date: first.updated_date }
          }).then(() => {
-             queryClient.invalidateQueries(['shifts']);
+             queryClient.invalidateQueries({ queryKey: ['shifts'] });
          }).catch(err => {
              alert("Fehler beim Aktualisieren: " + (err.response?.data?.message || err.message));
-             queryClient.invalidateQueries(['shifts']);
+             queryClient.invalidateQueries({ queryKey: ['shifts'] });
          });
     } else {
          // Work shift exists - show ConflictDialog
@@ -638,7 +638,7 @@ export default function VacationPage() {
   }, [customColors]);
 
   return (
-    <div className="container mx-auto max-w-7xl">
+    <div className="container mx-auto max-w-7xl" data-testid="vacation-page">
       <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
         <div>
           <h1 className="text-3xl font-bold text-slate-900">{absencesCaption}</h1>
@@ -662,12 +662,14 @@ export default function VacationPage() {
             
             <div className="bg-slate-100 p-1 rounded-lg flex">
                 <button 
+                    data-testid="vacation-view-single"
                     onClick={() => setViewMode('single')}
                     className={`px-3 py-1 text-sm font-medium rounded-md transition-all ${viewMode === 'single' ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                     Einzelansicht
                 </button>
                 <button 
+                    data-testid="vacation-view-overview"
                     onClick={() => setViewMode('overview')}
                     className={`px-3 py-1 text-sm font-medium rounded-md transition-all ${viewMode === 'overview' ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
                 >
@@ -677,27 +679,29 @@ export default function VacationPage() {
 
             <div className="flex items-center gap-4 bg-white p-2 rounded-lg shadow-sm border border-slate-200">
                <div className="flex items-center">
-                <Button variant="ghost" size="icon" onClick={() => setSelectedYear(y => y - 1)}>
-                    <ChevronLeft className="w-4 h-4" />
-                </Button>
-                <span className="mx-2 font-bold text-lg w-16 text-center">{selectedYear}</span>
-                <Button variant="ghost" size="icon" onClick={() => setSelectedYear(y => y + 1)}>
-                    <ChevronRight className="w-4 h-4" />
-                </Button>
+                 <Button data-testid="vacation-year-prev" variant="ghost" size="icon" onClick={() => setSelectedYear(y => y - 1)}>
+                     <ChevronLeft className="w-4 h-4" />
+                 </Button>
+                 <span className="mx-2 font-bold text-lg w-16 text-center" data-testid="vacation-year-current">{selectedYear}</span>
+                 <Button data-testid="vacation-year-next" variant="ghost" size="icon" onClick={() => setSelectedYear(y => y + 1)}>
+                     <ChevronRight className="w-4 h-4" />
+                 </Button>
                </div>
                
                {viewMode === 'single' && (
                <>
                    <div className="w-px h-8 bg-slate-200 mx-2" />
 
-                     <EmployeeSelect
-                    value={selectedDoctorId || ''}
-                    onValueChange={setSelectedDoctorId}
-                    options={doctorSelectOptions}
-                    placeholder="Person auswählen"
-                    searchPlaceholder="Person suchen..."
-                    triggerClassName="w-[200px]"
-                     />
+                      <EmployeeSelect
+                     value={selectedDoctorId || ''}
+                     onValueChange={setSelectedDoctorId}
+                     options={doctorSelectOptions}
+                     placeholder="Person auswählen"
+                     searchPlaceholder="Person suchen..."
+                     triggerClassName="w-[200px]"
+                     triggerTestId="vacation-doctor-select-trigger"
+                     optionTestIdPrefix="vacation-doctor-option-"
+                      />
                </>
                )}
             </div>
@@ -706,9 +710,10 @@ export default function VacationPage() {
       
       <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
           {absenceTypes.map(type => (
-              <Button
-                  key={type.id}
-                  variant={activeType === type.id ? "default" : "outline"}
+               <Button
+                   key={type.id}
+                   data-testid={`vacation-type-${String(type.id).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`}
+                   variant={activeType === type.id ? "default" : "outline"}
                   onClick={() => !isReadOnly && setActiveType(type.id)}
                   className={`gap-2 ${activeType === type.id ? 'border-transparent shadow-sm' : 'hover:bg-slate-50'} ${isReadOnly ? 'cursor-default opacity-100 hover:bg-transparent' : ''}`}
                   style={activeType === type.id ? { backgroundColor: type.bgColor, color: type.textColor, borderColor: 'transparent' } : {}}
@@ -723,7 +728,7 @@ export default function VacationPage() {
       {viewMode === 'single' ? (
         <>
           {selectedDoctor ? (
-            <DoctorYearView 
+             <DoctorYearView 
                 doctor={selectedDoctor} 
                 year={selectedYear} 
                 shifts={yearShifts}
@@ -732,10 +737,11 @@ export default function VacationPage() {
                 activeType={activeType}
                 rangeStart={rangeStart}
               contractInfo={selectedDoctorContractInfo}
-                customColors={customColors}
-                isSchoolHoliday={isSchoolHoliday}
-                isPublicHoliday={isPublicHoliday}
-            />
+                 customColors={customColors}
+                 isSchoolHoliday={isSchoolHoliday}
+                 isPublicHoliday={isPublicHoliday}
+                 dayTestIdPrefix="vacation-day"
+             />
           ) : (
             <div className="text-center py-12 text-slate-500">
                 Bitte wählen Sie eine Person aus.

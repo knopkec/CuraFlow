@@ -81,15 +81,15 @@ const shiftEntries = [
 ];
 
 const wishRequests = [
-  ['wish-anna-may', 'doctor-anna', TARGET_MONTH, `${TARGET_MONTH}-12`, `${TARGET_MONTH}-12`, 'Dienst Vordergrund', 'service', 'approved', 'Frühdienst bevorzugt'],
+  ['wish-anna-may', 'doctor-anna', TARGET_MONTH, `${TARGET_MONTH}-12`, `${TARGET_MONTH}-12`, `${TARGET_MONTH}-12`, 'Dienst Vordergrund', 'service', 'approved', 'medium', 'Frühdienst bevorzugt', null, 'Frühdienst bevorzugt', false, null, null],
 ];
 
 const trainingRotations = [
-  ['training-clara-mrt', 'doctor-clara', 'MRT Einarbeitung', 'workplace-mrt', `${TARGET_MONTH}-10`, `${TARGET_MONTH}-14`, 'planned', 'Begleitung durch Oberarzt'],
+  ['training-clara-mrt', 'doctor-clara', 'MRT Einarbeitung', 'workplace-mrt', 'MRT Rotation', `${TARGET_MONTH}-10`, `${TARGET_MONTH}-14`, 'planned', 'Begleitung durch Oberarzt'],
 ];
 
 const staffingPlanEntries = [
-  ['staffing-ct-2026-05-06', 'doctor-clara', 'workplace-ct', `${TARGET_MONTH}-06`, '08:00:00', '16:00:00', 'assigned'],
+  ['staffing-clara-current-month', 'doctor-clara', Number(TARGET_MONTH.slice(0, 4)), Number(TARGET_MONTH.slice(5, 7)), '1.0'],
 ];
 
 const customHolidays = [
@@ -287,13 +287,20 @@ async function ensureTenantBaseTables(tenantPool) {
     `CREATE TABLE IF NOT EXISTS WishRequest (
       id VARCHAR(36) PRIMARY KEY,
       doctor_id VARCHAR(36) NOT NULL,
-      target_month VARCHAR(7) NOT NULL,
+      target_month VARCHAR(7) DEFAULT NULL,
+      date DATE DEFAULT NULL,
       start_date DATE DEFAULT NULL,
       end_date DATE DEFAULT NULL,
       position VARCHAR(255) DEFAULT NULL,
       type VARCHAR(50) DEFAULT 'service',
       status VARCHAR(32) DEFAULT 'pending',
+      priority VARCHAR(32) DEFAULT 'medium',
+      reason TEXT DEFAULT NULL,
+      admin_comment TEXT DEFAULT NULL,
       comment TEXT DEFAULT NULL,
+      user_viewed TINYINT(1) DEFAULT 0,
+      range_start DATE DEFAULT NULL,
+      range_end DATE DEFAULT NULL,
       approved_by VARCHAR(255) DEFAULT NULL,
       approved_date DATETIME DEFAULT NULL,
       created_date DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
@@ -303,8 +310,9 @@ async function ensureTenantBaseTables(tenantPool) {
     `CREATE TABLE IF NOT EXISTS TrainingRotation (
       id VARCHAR(36) PRIMARY KEY,
       doctor_id VARCHAR(36) NOT NULL,
-      title VARCHAR(255) NOT NULL,
+      title VARCHAR(255) DEFAULT NULL,
       workplace_id VARCHAR(36) DEFAULT NULL,
+      modality VARCHAR(255) DEFAULT NULL,
       start_date DATE NOT NULL,
       end_date DATE NOT NULL,
       status VARCHAR(32) DEFAULT 'planned',
@@ -361,11 +369,9 @@ async function ensureTenantBaseTables(tenantPool) {
     `CREATE TABLE IF NOT EXISTS StaffingPlanEntry (
       id VARCHAR(36) PRIMARY KEY,
       doctor_id VARCHAR(36) DEFAULT NULL,
-      workplace_id VARCHAR(36) DEFAULT NULL,
-      date DATE NOT NULL,
-      start_time TIME DEFAULT NULL,
-      end_time TIME DEFAULT NULL,
-      status VARCHAR(32) DEFAULT 'planned',
+      year INT NOT NULL,
+      month INT NOT NULL,
+      \`value\` TEXT DEFAULT NULL,
       created_date DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
       updated_date DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
       created_by VARCHAR(255) DEFAULT 'seed'
@@ -595,21 +601,21 @@ async function seedTenantData(tenantPool) {
   await upsertRows(
     tenantPool,
     'WishRequest',
-    ['id', 'doctor_id', 'target_month', 'start_date', 'end_date', 'position', 'type', 'status', 'comment'],
+    ['id', 'doctor_id', 'target_month', 'date', 'start_date', 'end_date', 'position', 'type', 'status', 'priority', 'reason', 'admin_comment', 'comment', 'user_viewed', 'range_start', 'range_end'],
     wishRequests
   );
 
   await upsertRows(
     tenantPool,
     'TrainingRotation',
-    ['id', 'doctor_id', 'title', 'workplace_id', 'start_date', 'end_date', 'status', 'notes'],
+    ['id', 'doctor_id', 'title', 'workplace_id', 'modality', 'start_date', 'end_date', 'status', 'notes'],
     trainingRotations
   );
 
   await upsertRows(
     tenantPool,
     'StaffingPlanEntry',
-    ['id', 'doctor_id', 'workplace_id', 'date', 'start_time', 'end_time', 'status'],
+    ['id', 'doctor_id', 'year', 'month', 'value'],
     staffingPlanEntries
   );
 

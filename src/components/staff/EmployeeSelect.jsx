@@ -34,6 +34,8 @@ export default function EmployeeSelect({
   triggerClassName,
   contentClassName,
   align = 'start',
+  triggerTestId,
+  optionTestIdPrefix,
 }) {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState('');
@@ -79,6 +81,7 @@ export default function EmployeeSelect({
           role="combobox"
           aria-expanded={open}
           aria-label={selectedOption ? selectedOption.triggerLabel || selectedOption.label : placeholder}
+          data-testid={triggerTestId}
           className={cn('w-full justify-between font-normal', triggerClassName)}
           disabled={disabled}
         >
@@ -130,6 +133,7 @@ export default function EmployeeSelect({
                 <CommandItem
                   key={option.value}
                   value={[option.label, option.description, option.searchText].filter(Boolean).join(' ')}
+                  data-testid={optionTestIdPrefix ? `${optionTestIdPrefix}${option.value}` : undefined}
                   className={cn('items-start', option.itemClassName)}
                   onSelect={() => {
                     onValueChange(option.value);

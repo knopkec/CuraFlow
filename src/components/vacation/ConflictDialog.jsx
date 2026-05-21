@@ -102,7 +102,7 @@ export default function ConflictDialog({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-lg">
+            <DialogContent className="max-w-lg" data-testid="vacation-conflict-dialog">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2 text-amber-600">
                         <AlertTriangle className="w-5 h-5" />
@@ -168,6 +168,7 @@ export default function ConflictDialog({
                             <div className="flex items-center space-x-2 pt-2 border-t border-blue-200">
                                 <Checkbox 
                                     id="keep-services" 
+                                    data-testid="vacation-conflict-keep-services"
                                     checked={keepOptionalServices}
                                     onCheckedChange={setKeepOptionalServices}
                                 />
@@ -194,10 +195,11 @@ export default function ConflictDialog({
                 </div>
                 
                 <DialogFooter className="gap-2">
-                    <Button variant="outline" onClick={handleCancel}>
+                    <Button data-testid="vacation-conflict-cancel" variant="outline" onClick={handleCancel}>
                         Abbrechen
                     </Button>
                     <Button 
+                        data-testid="vacation-conflict-confirm"
                         onClick={handleConfirm}
                         className="bg-amber-600 hover:bg-amber-700"
                     >

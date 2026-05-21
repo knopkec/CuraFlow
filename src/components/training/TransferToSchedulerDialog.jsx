@@ -256,7 +256,7 @@ export default function TransferToSchedulerDialog({
 
     return (
         <Dialog open={open} onOpenChange={handleOpenChange}>
-            <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col" data-testid="training-transfer-dialog">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         <CalendarDays className="w-5 h-5 text-emerald-600" />
@@ -274,21 +274,21 @@ export default function TransferToSchedulerDialog({
                             <Label className="text-sm font-medium text-slate-700">Übertragungsmodus</Label>
                             <RadioGroup value={transferMode} onValueChange={setTransferMode} className="space-y-2">
                                 <div className="flex items-center space-x-3 p-3 rounded-lg border hover:bg-slate-50 transition-colors">
-                                    <RadioGroupItem value="day" id="mode-day" />
+                                    <RadioGroupItem data-testid="training-transfer-mode-day" value="day" id="mode-day" />
                                     <Label htmlFor="mode-day" className="flex-1 cursor-pointer">
                                         <div className="font-medium">Einen Tag</div>
                                         <div className="text-sm text-slate-500">Nur den ausgewählten Tag übertragen</div>
                                     </Label>
                                 </div>
                                 <div className="flex items-center space-x-3 p-3 rounded-lg border hover:bg-slate-50 transition-colors">
-                                    <RadioGroupItem value="week" id="mode-week" />
+                                    <RadioGroupItem data-testid="training-transfer-mode-week" value="week" id="mode-week" />
                                     <Label htmlFor="mode-week" className="flex-1 cursor-pointer">
                                         <div className="font-medium">Eine Woche</div>
                                         <div className="text-sm text-slate-500">Die gesamte Woche des ausgewählten Datums</div>
                                     </Label>
                                 </div>
                                 <div className="flex items-center space-x-3 p-3 rounded-lg border hover:bg-slate-50 transition-colors">
-                                    <RadioGroupItem value="from_date" id="mode-from" />
+                                    <RadioGroupItem data-testid="training-transfer-mode-from-date" value="from_date" id="mode-from" />
                                     <Label htmlFor="mode-from" className="flex-1 cursor-pointer">
                                         <div className="font-medium">Alles ab Datum</div>
                                         <div className="text-sm text-slate-500">Alle Rotationen ab dem ausgewählten Datum bis Jahresende</div>
@@ -302,7 +302,7 @@ export default function TransferToSchedulerDialog({
                             <Label className="text-sm font-medium text-slate-700">Datum auswählen</Label>
                             <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
                                 <PopoverTrigger asChild>
-                                    <Button variant="outline" className="w-full justify-start text-left font-normal">
+                                    <Button data-testid="training-transfer-date-trigger" variant="outline" className="w-full justify-start text-left font-normal">
                                         <CalendarDays className="mr-2 h-4 w-4" />
                                         {format(effectiveDate, 'EEEE, dd. MMMM yyyy', { locale: de })}
                                     </Button>
@@ -334,6 +334,7 @@ export default function TransferToSchedulerDialog({
                         <div className="flex items-start space-x-3 p-4 rounded-lg border bg-amber-50 border-amber-200">
                             <Checkbox 
                                 id="overwrite" 
+                                data-testid="training-transfer-overwrite"
                                 checked={overwriteExisting} 
                                 onCheckedChange={setOverwriteExisting}
                                 className="mt-0.5"
@@ -510,17 +511,18 @@ export default function TransferToSchedulerDialog({
 
                 <DialogFooter className="border-t pt-4">
                     {showPreview && (
-                        <Button variant="ghost" onClick={() => setShowPreview(false)} className="mr-auto">
+                        <Button data-testid="training-transfer-back" variant="ghost" onClick={() => setShowPreview(false)} className="mr-auto">
                             ← Zurück
                         </Button>
                     )}
                     
-                    <Button variant="outline" onClick={() => handleOpenChange(false)}>
+                    <Button data-testid="training-transfer-cancel" variant="outline" onClick={() => handleOpenChange(false)}>
                         Abbrechen
                     </Button>
                     
                     {!showPreview ? (
                         <Button 
+                            data-testid="training-transfer-preview"
                             onClick={() => setShowPreview(true)}
                             className="bg-emerald-600 hover:bg-emerald-700"
                         >
@@ -529,6 +531,7 @@ export default function TransferToSchedulerDialog({
                     ) : (
                         transferPreview.entries.length > 0 && (
                             <Button 
+                                data-testid="training-transfer-confirm"
                                 onClick={handleTransfer}
                                 className="bg-emerald-600 hover:bg-emerald-700"
                                 disabled={isPending}

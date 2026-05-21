@@ -191,14 +191,14 @@ export default function TrainingPage() {
                 },
             }
         ),
-    onSuccess: () => queryClient.invalidateQueries(['trainingRotations']),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['trainingRotations'] }),
         onError: (error) => {
             toast({
                 variant: 'destructive',
                 title: 'Rotation konnte nicht gespeichert werden',
                 description: error.message || 'Die Aenderung konnte nicht vollstaendig verarbeitet werden.',
             });
-            queryClient.invalidateQueries(['trainingRotations']);
+            queryClient.invalidateQueries({ queryKey: ['trainingRotations'] });
         },
   });
 
@@ -206,7 +206,7 @@ export default function TrainingPage() {
   const bulkCreateShiftMutation = useMutation({
     mutationFn: (data) => db.ShiftEntry.bulkCreate(data),
     onSuccess: () => {
-        queryClient.invalidateQueries(['shifts', selectedYear]);
+        queryClient.invalidateQueries({ queryKey: ['shifts', selectedYear] });
     },
   });
 
@@ -215,7 +215,7 @@ export default function TrainingPage() {
         await Promise.all(ids.map(id => db.ShiftEntry.delete(id)));
     },
     onSuccess: () => {
-        queryClient.invalidateQueries(['shifts', selectedYear]);
+        queryClient.invalidateQueries({ queryKey: ['shifts', selectedYear] });
     },
   });
 
@@ -558,7 +558,7 @@ export default function TrainingPage() {
     }, [selectedYear, viewMode]);
 
   return (
-    <div className="container mx-auto max-w-7xl">
+    <div className="container mx-auto max-w-7xl" data-testid="training-page">
       <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
         <div>
                     <h1 className="text-3xl font-bold text-slate-900">{rotationsPageTitle}</h1>
@@ -568,6 +568,7 @@ export default function TrainingPage() {
         <div className="flex items-center gap-4">
             {!isReadOnly && user?.role === 'admin' && (
                 <Button 
+                    data-testid="training-transfer-button"
                     variant="outline" 
                     onClick={() => setShowTransferDialog(true)}
                     className="gap-2 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
@@ -580,18 +581,21 @@ export default function TrainingPage() {
             
             <div className="bg-slate-100 p-1 rounded-lg flex">
                 <button 
+                    data-testid="training-view-single"
                     onClick={() => setViewMode('single')}
                     className={`px-3 py-1 text-sm font-medium rounded-md transition-all ${viewMode === 'single' ? 'bg-white shadow text-emerald-600' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                     Einzelansicht
                 </button>
                 <button 
+                    data-testid="training-view-overview"
                     onClick={() => setViewMode('overview')}
                     className={`px-3 py-1 text-sm font-medium rounded-md transition-all ${viewMode === 'overview' ? 'bg-white shadow text-emerald-600' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                     Jahresübersicht
                 </button>
                 <button 
+                    data-testid="training-view-multi-year"
                     onClick={() => setViewMode('multi-year')}
                     className={`px-3 py-1 text-sm font-medium rounded-md transition-all ${viewMode === 'multi-year' ? 'bg-white shadow text-emerald-600' : 'text-slate-500 hover:text-slate-700'}`}
                 >
@@ -601,13 +605,13 @@ export default function TrainingPage() {
 
             <div className="flex items-center gap-4 bg-white p-2 rounded-lg shadow-sm border border-slate-200">
                <div className="flex items-center">
-                <Button variant="ghost" size="icon" onClick={() => setSelectedYear(y => y - 1)}>
-                    <ChevronLeft className="w-4 h-4" />
-                </Button>
-                <span className={`mx-2 font-bold text-lg text-center ${viewMode === 'multi-year' ? 'w-28' : 'w-16'}`}>{yearLabel}</span>
-                <Button variant="ghost" size="icon" onClick={() => setSelectedYear(y => y + 1)}>
-                    <ChevronRight className="w-4 h-4" />
-                </Button>
+                 <Button data-testid="training-year-prev" variant="ghost" size="icon" onClick={() => setSelectedYear(y => y - 1)}>
+                     <ChevronLeft className="w-4 h-4" />
+                 </Button>
+                 <span data-testid="training-year-current" className={`mx-2 font-bold text-lg text-center ${viewMode === 'multi-year' ? 'w-28' : 'w-16'}`}>{yearLabel}</span>
+                 <Button data-testid="training-year-next" variant="ghost" size="icon" onClick={() => setSelectedYear(y => y + 1)}>
+                     <ChevronRight className="w-4 h-4" />
+                 </Button>
                </div>
                
                {viewMode === 'single' ? (
@@ -615,14 +619,16 @@ export default function TrainingPage() {
                    <div className="w-px h-8 bg-slate-200 mx-2" />
 
                    {user?.role === 'admin' ? (
-                       <EmployeeSelect
-                        value={selectedDoctorId || ''}
-                        onValueChange={setSelectedDoctorId}
-                        options={doctorSelectOptions}
-                        placeholder="Person auswählen"
-                        searchPlaceholder="Person suchen..."
-                        triggerClassName="w-[200px]"
-                       />
+                        <EmployeeSelect
+                         value={selectedDoctorId || ''}
+                         onValueChange={setSelectedDoctorId}
+                         options={doctorSelectOptions}
+                         placeholder="Person auswählen"
+                         searchPlaceholder="Person suchen..."
+                         triggerClassName="w-[200px]"
+                         triggerTestId="training-doctor-select-trigger"
+                         optionTestIdPrefix="training-doctor-option-"
+                        />
                    ) : (
                        <div className="px-3 font-medium text-slate-700">
                            {selectedDoctor ? selectedDoctor.name : (user?.doctor_id ? 'Person nicht gefunden' : 'Keine Person zugeordnet')}
@@ -639,9 +645,10 @@ export default function TrainingPage() {
       <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
           {modalities.length > 0 ? (
               modalities.map(type => (
-                  <Button
-                      key={type.id}
-                      variant={activeModality === type.id ? "default" : "outline"}
+                   <Button
+                       key={type.id}
+                       data-testid={`training-modality-${String(type.id).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`}
+                       variant={activeModality === type.id ? "default" : "outline"}
                       onClick={() => !isReadOnly && setActiveModality(type.id)}
                       className={`gap-2 shrink-0 ${activeModality === type.id ? 'border-transparent shadow-sm' : 'hover:bg-slate-50'} ${isReadOnly ? 'cursor-default opacity-100 hover:bg-transparent' : ''}`}
                       style={activeModality === type.id ? { backgroundColor: type.bgColor, color: type.textColor, borderColor: 'transparent' } : {}}
@@ -669,7 +676,7 @@ export default function TrainingPage() {
                         <Button variant="ghost" size="sm" className="ml-auto hover:bg-indigo-100" onClick={() => setRangeStart(null)}>Abbrechen</Button>
                     </div>
                 )}
-                <DoctorYearView 
+                 <DoctorYearView 
                     doctor={selectedDoctor} 
                     year={selectedYear} 
                     shifts={dailyRotations}
@@ -678,10 +685,11 @@ export default function TrainingPage() {
                     activeType={activeModality}
                     rangeStart={rangeStart}
                     contractInfo={selectedDoctorContractInfo}
-                    customColors={customColors}
-                    isSchoolHoliday={isSchoolHoliday}
-                    isPublicHoliday={isPublicHoliday}
-                />
+                     customColors={customColors}
+                     isSchoolHoliday={isSchoolHoliday}
+                     isPublicHoliday={isPublicHoliday}
+                     dayTestIdPrefix="training-day"
+                 />
             </div>
           ) : (
             <div className="text-center py-12 text-slate-500">

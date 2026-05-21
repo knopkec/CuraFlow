@@ -10,7 +10,20 @@ import { DEFAULT_COLORS } from '@/components/settings/ColorSettingsDialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { getContractTooltipLabel, isDateWithinContract } from '@/components/training/trainingContractUtils';
 
-export default function DoctorYearView({ doctor, year, shifts, onToggle, onRangeSelect, activeType, rangeStart, contractInfo, customColors: propCustomColors, isSchoolHoliday, isPublicHoliday }) {
+export default function DoctorYearView({
+  doctor,
+  year,
+  shifts,
+  onToggle,
+  onRangeSelect,
+  activeType,
+  rangeStart,
+  contractInfo,
+  customColors: propCustomColors,
+  isSchoolHoliday,
+  isPublicHoliday,
+  dayTestIdPrefix = 'year-day',
+}) {
   const [dragStart, setDragStart] = useState(null);
   const [dragCurrent, setDragCurrent] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -275,6 +288,7 @@ export default function DoctorYearView({ doctor, year, shifts, onToggle, onRange
             getCustomColor={getCustomColor}
             isSchoolHoliday={isSchoolHoliday}
             isPublicHoliday={isPublicHoliday}
+            dayTestIdPrefix={dayTestIdPrefix}
           />
         ))}
       </div>
@@ -282,7 +296,7 @@ export default function DoctorYearView({ doctor, year, shifts, onToggle, onRange
   );
 }
 
-function MonthCalendar({ month, getShiftStatus, onDateClick, onMouseDown, onMouseEnter, dragStart, dragCurrent, isDragging, activeType, rangeStart, contractInfo, isDateDisabled, customColors, getCustomColor, isSchoolHoliday: checkSchoolHoliday, isPublicHoliday: checkPublicHoliday }) {
+function MonthCalendar({ month, getShiftStatus, onDateClick, onMouseDown, onMouseEnter, dragStart, dragCurrent, isDragging, activeType, rangeStart, contractInfo, isDateDisabled, customColors, getCustomColor, isSchoolHoliday: checkSchoolHoliday, isPublicHoliday: checkPublicHoliday, dayTestIdPrefix }) {
   const days = eachDayOfInterval({
     start: startOfMonth(month),
     end: endOfMonth(month)
@@ -377,6 +391,7 @@ function MonthCalendar({ month, getShiftStatus, onDateClick, onMouseDown, onMous
           return (
             <button
               key={date.toString()}
+              data-testid={`${dayTestIdPrefix}-${format(date, 'yyyy-MM-dd')}`}
                             onMouseDown={() => {
                                 if (!disabled) onMouseDown(date);
                             }}
