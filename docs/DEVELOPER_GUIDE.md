@@ -8,6 +8,7 @@
 
 | Dokument | Beschreibung |
 |---|---|
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) | Contribution workflow, required checks, and testing expectations |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Systemarchitektur, Tech-Stack, Datenfluss |
 | [SETUP.md](./SETUP.md) | Lokale Entwicklungsumgebung einrichten |
 | [DATABASE.md](./DATABASE.md) | Datenbankschema aller Tabellen |

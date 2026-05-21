@@ -11,8 +11,9 @@ const normalizeDateString = (value) => {
 
 export const getWishStartDate = (wish) => normalizeDateString(wish?.range_start || wish?.start_date || wish?.date);
 
-export const getWishEndDate = (wish) =>
-  normalizeDateString(wish?.range_end || wish?.end_date || wish?.date || wish?.start_date || wish?.range_start);
+export const getWishEndDate = (wish) => normalizeDateString(
+  wish?.range_end || wish?.end_date || wish?.date || wish?.start_date || wish?.range_start
+);
 
 export const hasWishRange = (wish) => {
   const start = getWishStartDate(wish);

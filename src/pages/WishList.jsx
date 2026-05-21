@@ -268,7 +268,7 @@ export default function WishListPage() {
 
               if (migratedCount > 0) {
                   trackDbChange();
-                  queryClient.invalidateQueries(['wishes']);
+                  queryClient.invalidateQueries({ queryKey: ['wishes'] });
               }
           } catch (error) {
               legacyRangeWishes.forEach((wish) => migratedLegacyWishIdsRef.current.delete(wish.id));
@@ -343,8 +343,8 @@ export default function WishListPage() {
     },
     onSuccess: () => {
         trackDbChange();
-        queryClient.invalidateQueries(['wishes']);
-        queryClient.invalidateQueries(['shifts']);
+        queryClient.invalidateQueries({ queryKey: ['wishes'] });
+        queryClient.invalidateQueries({ queryKey: ['shifts'] });
     },
   });
 
@@ -394,7 +394,7 @@ export default function WishListPage() {
           position: position,
           note: 'Aus genehmigtem Wunsch'
       });
-      queryClient.invalidateQueries(['shifts']);
+      queryClient.invalidateQueries({ queryKey: ['shifts'] });
   };
 
   const handleDialogSave = async (formData) => {
@@ -466,7 +466,7 @@ export default function WishListPage() {
           }
 
           trackDbChange();
-          queryClient.invalidateQueries(['wishes']);
+          queryClient.invalidateQueries({ queryKey: ['wishes'] });
           if (selectedDoctor) {
               const logDate = `${rangeDates[0]} bis ${rangeDates[rangeDates.length - 1]}`;
               const actionLabel = dialogState.wish
@@ -492,7 +492,7 @@ export default function WishListPage() {
           }
           
           trackDbChange();
-          queryClient.invalidateQueries(['wishes']);
+          queryClient.invalidateQueries({ queryKey: ['wishes'] });
           if (selectedDoctor) {
               logWishAction(`Eintrag aktualisiert (${dataToSave.status})`, selectedDoctor.name, dateStr, dataToSave.type);
           }
@@ -511,7 +511,7 @@ export default function WishListPage() {
           }
           
           trackDbChange();
-          queryClient.invalidateQueries(['wishes']);
+          queryClient.invalidateQueries({ queryKey: ['wishes'] });
           if (selectedDoctor) {
               logWishAction('Eintrag erstellt', selectedDoctor.name, dateStr, dataToSave.type);
           }
@@ -531,7 +531,7 @@ export default function WishListPage() {
   };
 
   return (
-    <div className="container mx-auto max-w-7xl">
+    <div className="container mx-auto max-w-7xl" data-testid="wishlist-page">
       <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
         <div>
           <h1 className="text-3xl font-bold text-slate-900">Wunschkiste</h1>
@@ -541,27 +541,29 @@ export default function WishListPage() {
         <div className="flex items-center gap-4">
             <div className="flex items-center gap-4 bg-white p-2 rounded-lg shadow-sm border border-slate-200">
                <div className="flex items-center">
-                <Button variant="ghost" size="icon" onClick={() => setSelectedYear(y => y - 1)}>
-                    <ChevronLeft className="w-4 h-4" />
-                </Button>
-                <span className="mx-2 font-bold text-lg w-16 text-center">{selectedYear}</span>
-                <Button variant="ghost" size="icon" onClick={() => setSelectedYear(y => y + 1)}>
-                    <ChevronRight className="w-4 h-4" />
-                </Button>
+                 <Button data-testid="wishlist-year-prev" variant="ghost" size="icon" onClick={() => setSelectedYear(y => y - 1)}>
+                     <ChevronLeft className="w-4 h-4" />
+                 </Button>
+                 <span className="mx-2 font-bold text-lg w-16 text-center" data-testid="wishlist-year-current">{selectedYear}</span>
+                 <Button data-testid="wishlist-year-next" variant="ghost" size="icon" onClick={() => setSelectedYear(y => y + 1)}>
+                     <ChevronRight className="w-4 h-4" />
+                 </Button>
                </div>
                
                <div className="w-px h-8 bg-slate-200 mx-2" />
 
-               {user?.role === 'admin' ? (
-                   <EmployeeSelect
-                    value={selectedDoctorId || ''}
-                    onValueChange={setSelectedDoctorId}
-                    options={doctorSelectOptions}
-                    placeholder="Person auswählen"
-                    searchPlaceholder="Person suchen..."
-                    triggerClassName="w-[200px]"
-                   />
-               ) : (
+                {user?.role === 'admin' ? (
+                    <EmployeeSelect
+                     value={selectedDoctorId || ''}
+                     onValueChange={setSelectedDoctorId}
+                     options={doctorSelectOptions}
+                     placeholder="Person auswählen"
+                     searchPlaceholder="Person suchen..."
+                     triggerClassName="w-[200px]"
+                     triggerTestId="wishlist-doctor-select-trigger"
+                     optionTestIdPrefix="wishlist-doctor-option-"
+                    />
+                ) : (
                    <div className="px-3 font-medium text-slate-700">
                        {selectedDoctor ? selectedDoctor.name : (user?.doctor_id ? 'Person nicht gefunden' : 'Keine Person zugeordnet')}
                    </div>
@@ -613,9 +615,10 @@ export default function WishListPage() {
       <div className="mb-6 overflow-x-auto pb-2">
           <div className="flex space-x-1">
               {serviceTypes.map(type => (
-                  <Button
-                      key={type}
-                      variant={activeTab === type ? "default" : "outline"}
+                   <Button
+                       key={type}
+                       data-testid={`wishlist-service-tab-${type.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`}
+                       variant={activeTab === type ? "default" : "outline"}
                       onClick={() => setActiveTab(type)}
                       className="whitespace-nowrap"
                       size="sm"
@@ -641,7 +644,7 @@ export default function WishListPage() {
 
               <TabsContent value="year" className="mt-0">
                   {selectedDoctor ? (
-                    <WishYearView 
+                     <WishYearView 
                         doctor={selectedDoctor} 
                         year={selectedYear} 
                         wishes={filteredDoctorWishes}
@@ -651,8 +654,8 @@ export default function WishListPage() {
                         onToggle={handleDateClick}
                         isSchoolHoliday={isSchoolHoliday}
                         isPublicHoliday={isPublicHoliday}
-                        activeType={activeTab}
-                    />
+                         activeType={activeTab}
+                     />
                   ) : (
                     <div className="text-center py-12 text-slate-500">
                         Bitte wählen Sie eine Person aus.
@@ -681,7 +684,7 @@ export default function WishListPage() {
       ) : (
         // Non-Admin View (Always Year)
         selectedDoctor ? (
-            <WishYearView 
+             <WishYearView 
                 doctor={selectedDoctor} 
                 year={selectedYear} 
                 wishes={filteredDoctorWishes}
@@ -691,8 +694,8 @@ export default function WishListPage() {
                 onToggle={handleDateClick}
                 isSchoolHoliday={isSchoolHoliday}
                 isPublicHoliday={isPublicHoliday}
-                activeType={activeTab}
-            />
+                 activeType={activeTab}
+             />
         ) : (
             <div className="text-center py-12 text-slate-500">
                 Bitte wählen Sie eine Person aus.

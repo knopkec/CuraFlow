@@ -1539,42 +1539,7 @@ export default function ScheduleBoard() {
   }, [colorSettings]);
 
   const createShiftMutation = useMutation({
-    mutationFn: async (data) => {
-        const shift = await db.ShiftEntry.create(data);
-
-        // Notify user if admin created it
-        if (user?.role === 'admin' && data.doctor_id) {
-            const doc = doctors.find(d => d.id === data.doctor_id);
-            if (doc && doc.id !== user.doctor_id) {
-                db.ShiftNotification.create({
-                    doctor_id: data.doctor_id,
-                    date: data.date,
-                    type: 'create',
-                    message: `Neuer Dienst eingetragen: ${data.position}`,
-                    acknowledged: false
-                });
-            }
-        }
-
-        // Check for matching wish and auto-approve
-        const matchingWish = wishes.find(w => 
-            w.doctor_id === data.doctor_id && 
-            isWishOnDate(w, data.date) &&
-            w.type === 'service' && 
-            w.status === 'pending' &&
-            (!w.position || w.position === data.position)
-        );
-
-        if (matchingWish) {
-            await db.WishRequest.update(matchingWish.id, { 
-                status: 'approved',
-                user_viewed: false,
-                admin_comment: 'Automatisch genehmigt durch Diensteinteilung'
-            });
-        }
-
-        return shift;
-    },
+    mutationFn: (data) => db.ShiftEntry.create(data),
     onMutate: async (newData) => {
         await queryClient.cancelQueries(['shifts', fetchRange.start, fetchRange.end]);
         const previousShifts = queryClient.getQueryData(['shifts', fetchRange.start, fetchRange.end]);
@@ -1585,11 +1550,47 @@ export default function ScheduleBoard() {
         }
         return { previousShifts };
     },
-    onSuccess: (data, _newData, _context) => {
+    onSuccess: (data, newData, _context) => {
         // trackDbChange(); // Disabled - MySQL mode
         setUndoStack(prev => [...prev, { type: 'DELETE', id: data.id }]);
         // Only invalidate shifts in affected range
         queryClient.invalidateQueries(['shifts', fetchRange.start, fetchRange.end]);
+
+        // Side-effects are best-effort: they must NOT roll back the primary write
+        // if they fail (which previously caused the UI to lose a successfully
+        // created shift after a transient DB hiccup).
+        if (user?.role === 'admin' && newData.doctor_id) {
+            const doc = doctors.find(d => d.id === newData.doctor_id);
+            if (doc && doc.id !== user.doctor_id) {
+                db.ShiftNotification.create({
+                    doctor_id: newData.doctor_id,
+                    date: newData.date,
+                    type: 'create',
+                    message: `Neuer Dienst eingetragen: ${newData.position}`,
+                    acknowledged: false,
+                }).catch((err) => console.warn('[ScheduleBoard] Notification create failed:', err?.message));
+            }
+        }
+
+        const matchingWish = wishes.find(w =>
+            w.doctor_id === newData.doctor_id &&
+            w.date === newData.date &&
+            w.type === 'service' &&
+            w.status === 'pending' &&
+            (!w.position || w.position === newData.position)
+        );
+        if (matchingWish) {
+            db.WishRequest.update(matchingWish.id, {
+                status: 'approved',
+                user_viewed: false,
+                admin_comment: 'Automatisch genehmigt durch Diensteinteilung',
+            })
+                .then(() => queryClient.invalidateQueries(['wishes']))
+                .catch((err) => {
+                    console.warn('[ScheduleBoard] Wunsch-Auto-Genehmigung fehlgeschlagen:', err?.message);
+                    toast.warning('Dienst wurde gespeichert, aber der zugehörige Wunsch konnte nicht automatisch genehmigt werden.');
+                });
+        }
     },
     onSettled: (_data, _error, newData) => {
         // Release cell lock after mutation completes (success or error)
@@ -1608,53 +1609,12 @@ export default function ScheduleBoard() {
             queryClient.invalidateQueries(['shifts', fetchRange.start, fetchRange.end]);
             return;
         }
-        alert(`Fehler beim Erstellen: ${error.message}`);
+        toast.error(`Fehler beim Erstellen: ${error.message}`);
     }
   });
 
   const bulkCreateShiftsMutation = useMutation({
-    mutationFn: async (shiftsData) => {
-        const createdShifts = await db.ShiftEntry.bulkCreate(shiftsData);
-        
-        // Side Effects handling for each created shift
-        // Note: bulkCreate returns the created objects
-        if (Array.isArray(createdShifts)) {
-            for (const shift of createdShifts) {
-                // Notifications
-                if (user?.role === 'admin' && shift.doctor_id) {
-                    const doc = doctors.find(d => d.id === shift.doctor_id);
-                    if (doc && doc.id !== user.doctor_id) {
-                        // Fire and forget notification to avoid slowing down
-                        db.ShiftNotification.create({
-                            doctor_id: shift.doctor_id,
-                            date: shift.date,
-                            type: 'create',
-                            message: `Neuer Dienst eingetragen: ${shift.position}`,
-                            acknowledged: false
-                        }).catch(console.error);
-                    }
-                }
-                
-                // Wish Approval
-                const matchingWish = wishes.find(w => 
-                    w.doctor_id === shift.doctor_id && 
-                    isWishOnDate(w, shift.date) &&
-                    w.type === 'service' && 
-                    w.status === 'pending' &&
-                    (!w.position || w.position === shift.position)
-                );
-
-                if (matchingWish) {
-                    await db.WishRequest.update(matchingWish.id, { 
-                        status: 'approved',
-                        user_viewed: false,
-                        admin_comment: 'Automatisch genehmigt durch Diensteinteilung'
-                    }).catch(console.error);
-                }
-            }
-        }
-        return createdShifts;
-    },
+    mutationFn: (shiftsData) => db.ShiftEntry.bulkCreate(shiftsData),
     onMutate: async (newShifts) => {
         await queryClient.cancelQueries(['shifts', fetchRange.start, fetchRange.end]);
         const previousShifts = queryClient.getQueryData(['shifts', fetchRange.start, fetchRange.end]);
@@ -1670,6 +1630,37 @@ export default function ScheduleBoard() {
         // trackDbChange(data.length); // Disabled - MySQL mode
         if (Array.isArray(data)) {
              setUndoStack(prev => [...prev, { type: 'BULK_DELETE', ids: data.map(s => s.id) }]);
+             // Best-effort side-effects (do not block / not rollback)
+             for (const shift of data) {
+                 if (user?.role === 'admin' && shift.doctor_id) {
+                     const doc = doctors.find(d => d.id === shift.doctor_id);
+                     if (doc && doc.id !== user.doctor_id) {
+                         db.ShiftNotification.create({
+                             doctor_id: shift.doctor_id,
+                             date: shift.date,
+                             type: 'create',
+                             message: `Neuer Dienst eingetragen: ${shift.position}`,
+                             acknowledged: false,
+                         }).catch((err) => console.warn('[ScheduleBoard] Bulk notification failed:', err?.message));
+                     }
+                 }
+                 const matchingWish = wishes.find(w =>
+                     w.doctor_id === shift.doctor_id &&
+                     w.date === shift.date &&
+                     w.type === 'service' &&
+                     w.status === 'pending' &&
+                     (!w.position || w.position === shift.position)
+                 );
+                 if (matchingWish) {
+                     db.WishRequest.update(matchingWish.id, {
+                         status: 'approved',
+                         user_viewed: false,
+                         admin_comment: 'Automatisch genehmigt durch Diensteinteilung',
+                     })
+                         .then(() => queryClient.invalidateQueries(['wishes']))
+                         .catch((err) => console.warn('[ScheduleBoard] Bulk wish approval failed:', err?.message));
+                 }
+             }
         }
         queryClient.invalidateQueries(['shifts', fetchRange.start, fetchRange.end]);
     },
@@ -1684,37 +1675,12 @@ export default function ScheduleBoard() {
             queryClient.invalidateQueries(['shifts', fetchRange.start, fetchRange.end]);
             return;
         }
-        alert(`Fehler beim Erstellen (Bulk): ${error.message}`);
+        toast.error(`Fehler beim Erstellen (Bulk): ${error.message}`);
     }
   });
 
   const updateShiftMutation = useMutation({
-    mutationFn: async ({ id, data }) => {
-        const shift = await db.ShiftEntry.update(id, data);
-
-        // Check for matching wish and auto-approve
-        // Note: data.doctor_id might not be present in update if only position changed, 
-        // or data.position/date might not be present. We need to merge with existing.
-        const fullShift = { ...allShifts.find(s => s.id === id), ...data };
-
-        const matchingWish = wishes.find(w => 
-            w.doctor_id === fullShift.doctor_id && 
-            isWishOnDate(w, fullShift.date) &&
-            w.type === 'service' && 
-            w.status === 'pending' &&
-            (!w.position || w.position === fullShift.position)
-        );
-
-        if (matchingWish) {
-             await db.WishRequest.update(matchingWish.id, { 
-                status: 'approved',
-                user_viewed: false,
-                admin_comment: 'Automatisch genehmigt durch Diensteinteilung'
-            });
-        }
-
-        return shift;
-    },
+    mutationFn: ({ id, data }) => db.ShiftEntry.update(id, data),
     onMutate: async ({ id, data }) => {
         // Cancel any outgoing refetches to avoid overwriting our optimistic update
         await queryClient.cancelQueries(['shifts', fetchRange.start, fetchRange.end]);
@@ -1738,7 +1704,29 @@ export default function ScheduleBoard() {
             const { id: _, created_date: _createdDate, updated_date: _updatedDate, created_by: _createdBy, ...oldData } = context.oldShift;
             setUndoStack(prev => [...prev, { type: 'UPDATE', id, data: oldData }]);
 
-            // Notify user if admin updated it
+            // Best-effort wish auto-approval (does NOT roll back primary update on failure)
+            const fullShift = { ...context.oldShift, ...inputData };
+            const matchingWish = wishes.find(w =>
+                w.doctor_id === fullShift.doctor_id &&
+                w.date === fullShift.date &&
+                w.type === 'service' &&
+                w.status === 'pending' &&
+                (!w.position || w.position === fullShift.position)
+            );
+            if (matchingWish) {
+                db.WishRequest.update(matchingWish.id, {
+                    status: 'approved',
+                    user_viewed: false,
+                    admin_comment: 'Automatisch genehmigt durch Diensteinteilung',
+                })
+                    .then(() => queryClient.invalidateQueries(['wishes']))
+                    .catch((err) => {
+                        console.warn('[ScheduleBoard] Wunsch-Auto-Genehmigung fehlgeschlagen:', err?.message);
+                        toast.warning('Dienst wurde aktualisiert, aber der zugehörige Wunsch konnte nicht automatisch genehmigt werden.');
+                    });
+            }
+
+            // Notify user if admin updated it (best-effort)
             if (user?.role === 'admin') {
                 const newShift = { ...context.oldShift, ...inputData };
                 const docId = newShift.doctor_id;
@@ -1793,7 +1781,7 @@ export default function ScheduleBoard() {
         if (context?.previousShifts) {
             queryClient.setQueryData(['shifts', fetchRange.start, fetchRange.end], context.previousShifts);
         }
-        alert(`Fehler beim Aktualisieren: ${error.message}`);
+        toast.error(`Fehler beim Aktualisieren: ${error.message}`);
     }
     });
 
@@ -1895,13 +1883,28 @@ export default function ScheduleBoard() {
         if (context?.previousShifts) {
             queryClient.setQueryData(['shifts', fetchRange.start, fetchRange.end], context.previousShifts);
         }
-        alert(`Fehler beim Löschen: ${error.message}`);
+        toast.error(`Fehler beim Löschen: ${error.message}`);
     }
   });
 
   const bulkDeleteMutation = useMutation({
     mutationFn: async (ids) => {
-        await Promise.all(ids.map(id => db.ShiftEntry.delete(id)));
+        // Use allSettled so a single failure does not leave the batch in a
+        // partially deleted state without the caller knowing. We collect
+        // failures and surface them so the user is informed.
+        const results = await Promise.allSettled(ids.map(id => db.ShiftEntry.delete(id)));
+        const failures = results
+            .map((r, idx) => ({ r, id: ids[idx] }))
+            .filter(({ r }) => r.status === 'rejected');
+        if (failures.length > 0) {
+            const firstError = failures[0].r.reason;
+            const err = new Error(
+                `${failures.length} von ${ids.length} Löschvorgängen sind fehlgeschlagen: ${firstError?.message || 'Unbekannter Fehler'}`,
+            );
+            err.failedIds = failures.map(f => f.id);
+            err.partial = failures.length < ids.length;
+            throw err;
+        }
     },
     onMutate: async (ids) => {
         await queryClient.cancelQueries(['shifts', fetchRange.start, fetchRange.end]);
@@ -1915,10 +1918,20 @@ export default function ScheduleBoard() {
         return { shifts, previousShifts };
     },
     onError: (err, _ids, context) => {
+         // If the failure was total, restore the optimistic snapshot. For a
+         // partial failure we cannot trust the snapshot (some rows really
+         // were deleted on the server), so refetch instead.
+         if (err?.partial && context?.previousShifts) {
+             queryClient.invalidateQueries(['shifts', fetchRange.start, fetchRange.end]);
+             toast.error(`Teilweiser Löschfehler: ${err.message}`, {
+                 description: 'Die Daten wurden vom Server neu geladen, damit die Anzeige korrekt ist.',
+             });
+             return;
+         }
          if (context?.previousShifts) {
              queryClient.setQueryData(['shifts', fetchRange.start, fetchRange.end], context.previousShifts);
          }
-         alert("Fehler beim Löschen: " + err.message);
+         toast.error(`Fehler beim Löschen: ${err.message}`);
     },
     onSuccess: (_data, ids, context) => {
         // trackDbChange(ids.length); // Disabled - MySQL mode

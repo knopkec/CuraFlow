@@ -907,14 +907,28 @@ router.post('/', async (req, res, next) => {
       if (keys.length === 0) {
         return res.status(400).json({ error: "No valid columns found for insert" });
       }
-      
-      // Insert each item individually to avoid MySQL2 bulk insert syntax issues
-      for (const item of processed) {
-        const values = keys.map(k => toSqlValue(item[k]));
-        const placeholders = keys.map(() => '?').join(',');
-        const sql = `INSERT INTO \`${tableName}\` (\`${keys.join('`,`')}\`) VALUES (${placeholders})`;
-        const safeValues = values.map(v => v === undefined ? null : v);
-        await dbPool.execute(sql, safeValues);
+
+      // Insert each item individually inside a transaction so that a mid-batch
+      // failure leaves no partial data. This prevents the UI from rolling back
+      // an optimistic update while the server has already persisted some rows.
+      const bulkConn = await dbPool.getConnection();
+      try {
+        await bulkConn.beginTransaction();
+        for (const item of processed) {
+          const values = keys.map(k => toSqlValue(item[k]));
+          const placeholders = keys.map(() => '?').join(',');
+          const sql = `INSERT INTO \`${tableName}\` (\`${keys.join('`,`')}\`) VALUES (${placeholders})`;
+          const safeValues = values.map(v => v === undefined ? null : v);
+          await bulkConn.execute(sql, safeValues);
+        }
+        await bulkConn.commit();
+      } catch (bulkErr) {
+        try { await bulkConn.rollback(); } catch (rollbackErr) {
+          console.error('[DB Proxy] bulkCreate rollback failed:', rollbackErr.message);
+        }
+        throw bulkErr;
+      } finally {
+        bulkConn.release();
       }
 
       if (isPlanSyncEntity(tableName)) {

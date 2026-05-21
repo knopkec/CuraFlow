@@ -1,331 +1,253 @@
-# Test-Strategie & Szenarien
+# Testing Guide
 
-CuraFlow besitzt aktuell **keine automatisierten Tests**. Dieses Dokument definiert eine umfassende manuelle und automatisierbare Test-Strategie für externe Entwickler.
+CuraFlow ships with automated **unit**, **component**, and **headless end-to-end** coverage. This guide documents the current test stack, the local workflows, and the rules for adding new tests without making the suite brittle.
 
----
+## Test stack
 
-## Test-Kategorien
+| Layer | Tooling | Primary location | Purpose |
+| --- | --- | --- | --- |
+| Unit | Vitest | `src/**/__tests__/`, `server/**/__tests__/` | Pure utilities, small server helpers, deterministic logic |
+| Component | Vitest + React Testing Library + MSW | `src/**/__component_tests__/` | UI workflows with mocked API/state boundaries |
+| E2E | Playwright | `e2e/specs/**` | Browser workflows against the real Express + MySQL harness |
 
-| Kategorie | Präfix | Beschreibung |
-|---|---|---|
-| Authentifizierung | T-AUTH | Login, Rollen, Token |
-| Dienstplan | T-SCH | Kernfunktionen des Plans |
-| Wunschliste | T-WISH | Wunsch-CRUD, Genehmigungen |
-| Urlaub | T-VAC | Urlaubs-Einträge, Konflikte |
-| Weiterbildung | T-TRG | Training-Einträge, Transfer |
-| Statistiken | T-STAT | Reports, Diagramme, Export |
-| Admin | T-ADM | Benutzerverwaltung, Einstellungen |
-| Sprachsteuerung | T-VOICE | Mikrofon, Befehle, Agent |
-| API | T-API | Backend-Endpunkte direkt testen |
-| Performance | T-PERF | Ladezeiten, große Datenmengen |
-| Realtime | T-RT | SSE-Stream, automatische Planaktualisierung |
+## Local commands
 
-Einzelne Szenarien je Kategorie sind in den jeweiligen Feature-Dokumenten beschrieben.
+| Command | What it does |
+| --- | --- |
+| `npm run test:unit` | Runs the Vitest unit project |
+| `npm run test:component` | Runs the component project in `happy-dom` |
+| `npm run test:coverage` | Runs unit + component coverage and writes the HTML report to `coverage/index.html` |
+| `npm run test:e2e` | Runs the Playwright suite against the deterministic Docker-backed harness |
+| `npm run test:e2e:repeat` | Re-runs the Playwright suite with `--repeat-each=2` for flake detection |
+| `npm run test:e2e:ui` | Opens Playwright UI mode locally |
+| `npm run test:e2e:install` | Installs the required Playwright browser binaries |
+| `npm run test:db:up` | Starts the MySQL + backend E2E harness |
+| `npm run test:db:seed` | Seeds the deterministic master + tenant data set |
+| `npm run test:db:down` | Stops and removes the E2E harness |
 
----
-
-## Empfohlene Test-Umgebung
-
-### Testdaten anlegen
-
-```sql
--- Testbenutzer
-INSERT INTO app_users (email, password_hash, role, full_name, is_active)
-VALUES
-  ('admin@test.de', '$2a$10$...', 'admin', 'Test Admin', 1),
-  ('user@test.de',  '$2a$10$...', 'user',  'Test User',  1),
-  ('ro@test.de',    '$2a$10$...', 'readonly', 'Test RO', 1);
-
--- Testmitarbeitende
-INSERT INTO doctors (name, role, `order`, is_active)
-VALUES
-  ('Alex Müller',  'Senior',      1, 1),
-  ('Sam Schmidt',  'Junior',      2, 1),
-  ('Chris Weber',  'Teamleitung', 3, 1);
-
--- Testarbeitsbereiche
-INSERT INTO workplaces (name, category, `order`, is_active)
-VALUES
-  ('Dienst Vordergrund', 'Dienste', 1, 1),
-  ('CT',                 'Dienste', 2, 1),
-  ('MRT',                'Dienste', 3, 1);
-```
-
-Das Standard-Passwort für Testbenutzer kann mit `bcryptjs` generiert werden:
-
-```javascript
-const bcrypt = require('bcryptjs');
-const hash = bcrypt.hashSync('Test1234!', 10);
-console.log(hash); // In INSERT verwenden
-```
-
----
-
-## API-Tests mit curl / HTTP-Client
-
-### Login
+For frontend or shared runtime changes, the normal local validation path is:
 
 ```bash
-curl -X POST http://localhost:3000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"admin@test.de","password":"Test1234!"}' \
-  | jq .token
+npm run build
+npm run test:unit
+npm run test:component
 ```
+
+For UI workflow changes, also run:
 
 ```bash
-# Token in Variable speichern
-TOKEN=$(curl -s -X POST http://localhost:3000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"admin@test.de","password":"Test1234!"}' | jq -r .token)
+npm run test:e2e
 ```
 
-### Mitarbeitende abrufen
+## E2E harness
+
+Playwright does **not** run against mocked data. It boots:
+
+1. the Vite frontend,
+2. the Express backend from `server/`,
+3. a MySQL 8.4 test database,
+4. a deterministic seed created by `server/scripts/seed-test-data.js`.
+
+### Optional local test environment file
+
+`.env.test` is optional and git-ignored. If present, the helper scripts load it automatically through `scripts/load-test-env.js`.
+
+Start from:
 
 ```bash
-curl -H "Authorization: Bearer $TOKEN" \
-     http://localhost:3000/api/db/Doctor | jq .
+cp .env.test.example .env.test
 ```
 
-### Diensteintrag erstellen
+Required variables:
 
-```bash
-curl -X POST http://localhost:3000/api/db/ShiftEntry \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "doctor_id": 1,
-    "date": "2024-03-11",
-    "workplace": "CT",
-    "section": "Dienste"
-  }'
+```dotenv
+TEST_MYSQL_ROOT_PASSWORD=
+TEST_MYSQL_PASSWORD=
+TEST_JWT_SECRET=
+SEED_ADMIN_PASSWORD=
+SEED_USER_PASSWORD=
+SEED_READONLY_PASSWORD=
 ```
 
-### Dienste für Woche abrufen
+Never commit `.env.test` or hard-code seeded passwords in source files, docs, tests, or workflows.
 
-```bash
-curl -X POST http://localhost:3000/api/db/ShiftEntry/filter \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "filter": {
-      "date": { "$gte": "2024-03-11", "$lte": "2024-03-17" }
-    }
-  }' | jq .
-```
+### Seeded user roles
 
-### Realtime-Stream prüfen
+The deterministic harness creates one account per role:
 
-```bash
-curl -N "http://localhost:3000/api/auth/events/stream?access_token=$TOKEN"
-```
+| Role | Email |
+| --- | --- |
+| Admin | `admin@test.local` |
+| User | `user@test.local` |
+| Read-only | `readonly@test.local` |
 
-Mit aktivem Department-Token:
+Passwords come from the `SEED_*_PASSWORD` environment variables, locally or in CI.
 
-```bash
-curl -N "http://localhost:3000/api/auth/events/stream?access_token=$TOKEN&db_token=$DB_TOKEN"
-```
-
-Erwartung:
-
-- Direkt nach Aufbau erscheint ein `connected`-Event.
-- Nach einer Planänderung erscheint ein `plan-update`-Event.
-
----
-
-## Automatisiertes Testing einrichten
-
-### Empfohlene Tools
-
-| Tool | Verwendung |
-|---|---|
-| **Vitest** | Unit-Tests für React-Hooks und Hilfsfunktionen |
-| **React Testing Library** | Komponenten-Tests |
-| **Supertest** | Backend API-Tests (Node.js) |
-| **Playwright** | End-to-End Browser-Tests |
-| **MSW (Mock Service Worker)** | API-Mocking für Frontend-Tests |
-
-### Installation
-
-```bash
-# Frontend
-npm install -D vitest @testing-library/react @testing-library/jest-dom msw
-
-# Backend
-cd server
-npm install -D supertest
-
-# E2E
-npm install -D @playwright/test
-npx playwright install
-```
-
----
-
-## Realtime-Tests
-
-### T-RT-01: Stream-Aufbau im Department-Frontend
+## Repository layout for tests
 
 ```text
-Voraussetzung: Benutzer ist im Department-Frontend eingeloggt, Department-Token ist aktiv
-Aktion: Browser-Konsole und Network-Tab öffnen
-Erwartet:
-  - Offener Request auf /api/auth/events/stream
-  - Browser-Konsole zeigt "Realtime-Verbindung aktiv"
-  - Backend-Log zeigt "[Realtime] Stream-Anfrage" und "[Realtime] Client verbunden"
+e2e/
+  fixtures/        shared Playwright fixtures
+  pages/           page objects
+  specs/           workflow specs grouped by feature
+  support/         seeded config, API helpers
+
+src/**/__tests__/              Vitest unit tests
+src/**/__component_tests__/    Vitest + RTL component tests
+src/test-utils/                shared RTL/MSW setup
+server/**/__tests__/           backend unit/integration-style tests
 ```
 
-### T-RT-02: Planänderung wird an zweites Fenster gepusht
+## Choosing the right test level
 
-```text
-Voraussetzung: Zwei Browserfenster im selben Department, beide eingeloggt
-Aktion: In Fenster A eine Schicht anlegen, verschieben oder löschen
-Erwartet:
-  - Backend-Log zeigt "[Realtime] Sende Plan-Event"
-  - Fenster B loggt "Push-Event empfangen"
-  - Fenster B invalidiert Queries und zeigt den neuen Planstand ohne Navigation
-```
+Use the smallest layer that still proves the behavior you need:
 
-### T-RT-03: Tenant-Scope ist korrekt getrennt
+- **Unit test** for pure helpers, parsers, business rules, and migration helpers.
+- **Component test** for a focused UI flow that can be exercised with mocked API boundaries.
+- **Playwright** for cross-page flows, persistence checks, auth/role behavior, downloads, realtime, and interactions that depend on the real backend.
 
-```text
-Voraussetzung: Zwei unterschiedliche Departments mit verschiedenen DB-Tokens
-Aktion: In Department A den Plan ändern
-Erwartet:
-  - Backend-Log sendet das Event nur an den Scope von Department A
-  - Offene Fenster in Department B erhalten kein plan-update-Event
-```
+Do not push everything into E2E. E2E should cover **critical workflows**, not every branch of every component.
 
-### T-RT-04: Debugging bei fehlenden Updates
+## Authoring rules
 
-```text
-Prüfschritte:
-  1. Browser-Konsole auf PlanUpdateListener filtern
-  2. Prüfen, ob Auth-Check abgeschlossen ist und ein JWT vorliegt
-  3. Network-Tab: bleibt /api/auth/events/stream offen?
-  4. Backend-Log: erscheinen "Stream-Anfrage", "Client verbunden" und "Sende Plan-Event"?
-  5. Falls Backend sendet, aber Browser nichts erhält: Proxy-/Compression-Buffering prüfen
-```
+### 1. Assert workflows, not markup trivia
 
-### Beispiel: Unit-Test für Hilfsfunktion
+Good tests prove outcomes such as:
 
-```javascript
-// src/components/schedule/__tests__/staffingUtils.test.js
-import { isDoctorAvailable } from '../staffingUtils';
-import { describe, it, expect } from 'vitest';
+- a user can create a doctor and the new row persists,
+- an admin setting survives a reload,
+- a realtime update appears in another browser context,
+- a download is triggered with the expected file type.
 
-describe('isDoctorAvailable', () => {
-  it('returns false when doctor is on vacation', () => {
-    const shifts = [{ doctor_id: 1, date: '2024-03-11', workplace: 'Urlaub' }];
-    expect(isDoctorAvailable(1, '2024-03-11', shifts)).toBe(false);
-  });
+Avoid brittle assertions on implementation-only structure.
 
-  it('returns true when doctor has no shifts', () => {
-    expect(isDoctorAvailable(1, '2024-03-11', [])).toBe(true);
-  });
-});
-```
+### 2. Selector priority
 
-### Beispiel: Backend-API-Test
+Use selectors in this order:
 
-```javascript
-// server/__tests__/auth.test.js
-import request from 'supertest';
-import app from '../app.js'; // app.js (ohne listen()) exportieren
+1. `getByRole(...)`
+2. `getByLabel(...)`
+3. Stable text only when the text is the actual contract
+4. `data-testid` when the UI has no robust semantic hook
 
-describe('POST /api/auth/login', () => {
-  it('returns 401 with wrong password', async () => {
-    const response = await request(app)
-      .post('/api/auth/login')
-      .send({ email: 'admin@test.de', password: 'wrong' });
-    
-    expect(response.status).toBe(401);
-    expect(response.body.error).toBeDefined();
-  });
+When adding `data-testid`, keep it:
 
-  it('returns token with correct credentials', async () => {
-    const response = await request(app)
-      .post('/api/auth/login')
-      .send({ email: 'admin@test.de', password: 'Test1234!' });
-    
-    expect(response.status).toBe(200);
-    expect(response.body.token).toBeDefined();
-  });
-});
-```
+- feature-scoped,
+- kebab-case,
+- stable across refactors,
+- descriptive enough to stand on its own.
 
-### Beispiel: Playwright E2E-Test
+Examples:
 
-```javascript
-// e2e/login.spec.js
-import { test, expect } from '@playwright/test';
+- `staff-form-submit`
+- `admin-user-create-button`
+- `statistics-export-pdf`
 
-test('Login-Flow', async ({ page }) => {
-  await page.goto('http://localhost:5173');
-  
-  // Weiterleitung zur Login-Seite
-  await expect(page).toHaveURL(/AuthLogin/);
-  
-  // Login
-  await page.fill('input[type="email"]', 'admin@test.de');
-  await page.fill('input[type="password"]', 'Test1234!');
-  await page.click('button[type="submit"]');
-  
-  // Weiterleitung nach Login
-  await expect(page).not.toHaveURL(/AuthLogin/);
-  await expect(page.locator('text=Dienstplan')).toBeVisible();
-});
+### 3. Use page objects for browser workflows
 
-test('Dienstplan laden', async ({ page }) => {
-  // ... Login zuerst ...
-  await page.goto('http://localhost:5173/Schedule');
-  
-  // Dienstplan-Tabelle sichtbar
-  await expect(page.locator('[data-testid="schedule-board"]')).toBeVisible();
-});
-```
+Playwright specs should keep locator details in `e2e/pages/**`. Specs should read like workflow descriptions and use the shared fixtures from `e2e/fixtures/auth.ts`.
 
----
+### 4. Arrange through API when possible
 
-## Performance-Tests
+For Playwright, prefer:
 
-### T-PERF-01: Dienstplan mit 200 Einträgen
+- arrange via seeded data or API helpers,
+- perform the **actual behavior under test** through the UI,
+- assert through both UI and persisted backend state when it matters.
 
-```
-Vorbereitung: 200 shift_entries für aktuelle Woche einfügen
-Messung: Ladezeit der Schedule-Seite (Network-Tab in DevTools)
-Akzeptanzgrenze: < 2 Sekunden bis Anzeige
-```
+### 5. Keep tests deterministic
 
-### T-PERF-02: Statistiken mit 5000 Einträgen
+- No random data without a unique prefix or suffix.
+- No arbitrary sleeps; use Playwright polling or RTL async queries.
+- Clean up records created by mutating tests.
+- If a mutating Playwright flow is unsafe across browser projects, scope it explicitly (for example Chromium-only) and document why in the test.
 
-```
-Vorbereitung: 5000 shift_entries für das Jahr einfügen
-Messung: Ladezeit + React-Rendering (React DevTools Profiler)
-Akzeptanzgrenze: < 5 Sekunden, kein Browser-Freeze
-```
+## Coverage policy
 
-### T-PERF-03: Gleichzeitige API-Requests
+Coverage is **advisory**, not a merge gate by itself.
+
+Current policy:
+
+- New or meaningfully changed code should reach **>= 80% line coverage**
+- Critical paths should reach **>= 95% line coverage**
+
+Critical paths include:
+
+- auth flows and token handling,
+- scheduling logic,
+- the cost function and closely related scheduling utilities.
+
+### Local coverage run
 
 ```bash
-# Benchmark mit Apache Bench
-ab -n 100 -c 10 -H "Authorization: Bearer $TOKEN" \
-   http://localhost:3000/api/db/Doctor
-
-# Erwartung: p95 < 200ms
+npm run test:coverage
+open coverage/index.html
 ```
 
----
+### CI coverage advisory
 
-## Checkliste vor einem Release
+The `CI` workflow publishes a coverage summary to the GitHub Actions step summary. It is intentionally **non-blocking** so the repo can surface coverage trends without turning pre-existing baseline gaps into red PRs.
 
-- [ ] Alle CRUD-Operationen für `ShiftEntry`, `Doctor`, `Workplace` funktionieren
-- [ ] Login mit Admin, User und Readonly funktioniert korrekt
-- [ ] Drag-and-Drop im Dienstplan funktioniert (Desktop+Mobile)
-- [ ] Undo-Funktion bringt letzten Eintrag zurück
-- [ ] Export (Excel) lädt ohne Fehler herunter
-- [ ] Admin kann neuen Benutzer anlegen + Passwort setzen
-- [ ] Wunschliste: Eintragen → Genehmigen → Status geändert
-- [ ] Urlaubsplanung: Eintragen → im Dienstplan sichtbar
-- [ ] Rate-Limiting aktiv (> 10 Logins → 429)
-- [ ] ENV-Variablen vollständig dokumentiert
-- [ ] Keine sensiblen Daten (Passwörter, JWT-Secret) in Logs
+Important limitation:
+
+- the workflow can summarize repository coverage and selected critical files,
+- it **cannot automatically infer “new code only”** from the PR diff,
+- reviewers still need to apply the `>= 80% for new code` rule to the files changed in the PR.
+
+## CI workflows
+
+### `CI`
+
+Runs the fast, always-on checks:
+
+- `npm run build`
+- `npm run test:unit`
+- `npm run test:component`
+
+It also runs a separate **coverage advisory** job that:
+
+- executes `npm run test:coverage`,
+- publishes a Markdown summary to `$GITHUB_STEP_SUMMARY`,
+- uploads the generated `coverage/` report as an artifact.
+
+### `E2E`
+
+Runs the Playwright suite headlessly against the Docker-backed harness and uploads traces/screenshots/videos on failure.
+
+### `Playwright Flake Detection`
+
+This scheduled workflow runs the Playwright suite with `--repeat-each=2` on a nightly cadence plus manual dispatch. Its purpose is to catch tests that only fail intermittently before they become regular CI failures.
+
+## Flake triage process
+
+When a test fails non-deterministically:
+
+1. rerun it once and confirm whether the failure is repeatable,
+2. inspect the Playwright trace/video or Vitest error output,
+3. file or update a tracking issue,
+4. apply the `flaky-tests` label in GitHub,
+5. stabilize the test quickly or quarantine it with a documented reason.
+
+The `flaky-tests` label is a repository setting, not a versioned file. If it is missing in a fork, create it in GitHub before relying on the nightly workflow for triage.
+
+## Expectations for new work
+
+Every feature, bug fix, or refactor should add or update automated tests that cover:
+
+1. the happy path,
+2. at least one meaningful failure or edge case,
+3. persistence or side effects when the workflow changes stored data.
+
+For UI work:
+
+- add Playwright coverage when the behavior crosses page, auth, backend, realtime, or download boundaries,
+- add component coverage for complex focused UI logic that should remain stable across the TypeScript/modularization refactor.
+
+## Common review questions
+
+Before opening a PR, answer these clearly:
+
+- Which automated test proves the new behavior?
+- Which test proves an existing workflow still works?
+- If the change touches shared UI/state infrastructure, why is the chosen test layer sufficient?
+- If coverage dropped for a critical path, is that intentional and explained?

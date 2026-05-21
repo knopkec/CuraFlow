@@ -16,6 +16,28 @@ import {
 
 const HEALTH_TIMEOUT_MS = 120_000;
 const HEALTH_INTERVAL_MS = 2_000;
+const HEALTH_REQUEST_TIMEOUT_MS = 5_000;
+const API_REQUEST_TIMEOUT_MS = 15_000;
+
+async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = API_REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`Request to ${url} timed out after ${timeoutMs}ms`);
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 function runCommand(command: string, env: NodeJS.ProcessEnv) {
   execSync(command, {
@@ -27,10 +49,17 @@ function runCommand(command: string, env: NodeJS.ProcessEnv) {
 
 async function waitForHealth() {
   const startedAt = Date.now();
+  let attempts = 0;
 
   while (Date.now() - startedAt < HEALTH_TIMEOUT_MS) {
+    attempts += 1;
+
     try {
-      const response = await fetch(`${backendURL}/health`);
+      const response = await fetchWithTimeout(
+        `${backendURL}/health`,
+        {},
+        HEALTH_REQUEST_TIMEOUT_MS
+      );
       if (response.ok) {
         return;
       }
@@ -41,11 +70,11 @@ async function waitForHealth() {
     await new Promise((resolve) => setTimeout(resolve, HEALTH_INTERVAL_MS));
   }
 
-  throw new Error(`Timed out waiting for ${backendURL}/health`);
+  throw new Error(`Timed out waiting for ${backendURL}/health after ${attempts} attempts`);
 }
 
 async function authenticateUser(email: string, password: string) {
-  const loginResponse = await fetch(`${backendURL}/api/auth/login`, {
+  const loginResponse = await fetchWithTimeout(`${backendURL}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
@@ -59,7 +88,7 @@ async function authenticateUser(email: string, password: string) {
   const loginData = await loginResponse.json();
   const authHeader = { Authorization: `Bearer ${loginData.token}` };
 
-  const tenantsResponse = await fetch(`${backendURL}/api/auth/my-tenants`, {
+  const tenantsResponse = await fetchWithTimeout(`${backendURL}/api/auth/my-tenants`, {
     headers: authHeader,
   });
 
@@ -71,7 +100,7 @@ async function authenticateUser(email: string, password: string) {
   const tenantsData = await tenantsResponse.json();
   const tenantId = tenantsData.tenants?.[0]?.id || getTenantId();
 
-  const activateResponse = await fetch(`${backendURL}/api/auth/activate-tenant/${tenantId}`, {
+  const activateResponse = await fetchWithTimeout(`${backendURL}/api/auth/activate-tenant/${tenantId}`, {
     method: 'POST',
     headers: authHeader,
   });
@@ -118,13 +147,18 @@ export default async function globalSetup(_config: FullConfig) {
 
   await fs.mkdir(authStateDir, { recursive: true });
 
+  console.log('[e2e] Starting backend harness');
   runCommand('npm run test:db:up', env);
+  console.log('[e2e] Waiting for backend health');
   await waitForHealth();
 
+  console.log('[e2e] Seeding deterministic test data');
   runCommand('npm run test:db:seed', env);
+  console.log('[e2e] Re-checking backend health after seeding');
   await waitForHealth();
 
   for (const [role, user] of Object.entries(seededUsers)) {
+    console.log(`[e2e] Generating storage state for ${role}`);
     const authState = await authenticateUser(user.email, getUserPassword(role as keyof typeof seededUsers));
     await writeStorageState(user.storageStatePath, authState);
   }

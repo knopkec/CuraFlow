@@ -3,6 +3,19 @@ import { defineConfig } from 'vite'
 import { defineProject } from 'vitest/config'
 import path from 'path'
 
+const coverageConfig = {
+  provider: 'v8',
+  include: [
+    'src/utils/**',
+    'src/components/AuthProvider.jsx',
+    'src/components/schedule/costFunction.js',
+    'src/components/schedule/staffingUtils.jsx',
+    'src/components/staff/DoctorForm.jsx',
+  ],
+  exclude: ['src/**/__tests__/**', 'src/**/__component_tests__/**', '**/*.test.*'],
+  reporter: ['text', 'lcov', 'json-summary', 'html'],
+}
+
 const unitProject = defineProject({
   plugins: [react()],
   resolve: {
@@ -15,12 +28,6 @@ const unitProject = defineProject({
     environment: 'node',
     include: ['src/**/__tests__/**/*.test.{js,jsx}', 'server/**/__tests__/**/*.test.js'],
     exclude: ['src/**/__component_tests__/**'],
-    coverage: {
-      provider: 'v8',
-      include: ['src/utils/**', 'src/components/schedule/costFunction.js', 'src/components/schedule/staffingUtils.jsx'],
-      exclude: ['src/**/__tests__/**', 'src/**/__component_tests__/**', '**/*.test.*'],
-      reporter: ['text', 'lcov'],
-    },
   },
 })
 
@@ -46,6 +53,7 @@ const componentProject = defineProject({
 export default defineConfig({
   test: {
     projects: [unitProject, componentProject],
+    coverage: coverageConfig,
   },
   logLevel: 'error', // Suppress warnings, only show errors
   cacheDir: '.vite',

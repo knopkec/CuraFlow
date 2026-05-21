@@ -276,6 +276,7 @@ function MonthCalendar({ month, getDayStatus, occupiedWishDates, onDateClick, on
           return (
             <button
               key={date.toString()}
+              data-testid={`wishlist-day-${dateStr}`}
               onMouseDown={(e) => !isBeforeDeadline && !isContractDisabled && onDayMouseDown?.(date, e)}
               onMouseEnter={() => !isBeforeDeadline && !isContractDisabled && onDayMouseEnter?.(date)}
               onMouseUp={() => onDayMouseUp?.()}

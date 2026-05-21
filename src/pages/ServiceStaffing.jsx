@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { api, db } from "@/api/client";
 import { useAuth } from '@/components/AuthProvider';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths, isWeekend } from 'date-fns';
@@ -191,76 +192,72 @@ export default function ServiceStaffingPage() {
         }
     });
 
+    // ============================================================
+    //  Helpers — keep side-effects (wish approval, notifications)
+    //  outside the primary write so a transient failure on a side-
+    //  effect does NOT roll back the user-visible main change.
+    // ============================================================
+    const approveMatchingWishSafe = (shiftLike) => {
+        if (!shiftLike?.doctor_id || !shiftLike?.date) return;
+        const matchingWish = wishes.find(w =>
+            w.doctor_id === shiftLike.doctor_id &&
+            isWishOnDate(w, shiftLike.date) &&
+            w.type === 'service' &&
+            w.status === 'pending' &&
+            (!w.position || w.position === shiftLike.position)
+        );
+        if (!matchingWish) return;
+        db.WishRequest.update(matchingWish.id, {
+            status: 'approved',
+            user_viewed: false,
+            admin_comment: 'Automatisch genehmigt durch Diensteinteilung',
+        })
+            .then(() => queryClient.invalidateQueries(['wishes']))
+            .catch((err) => {
+                console.error('[ServiceStaffing] Wunsch-Auto-Genehmigung fehlgeschlagen:', err);
+                toast.warning('Dienst wurde gespeichert, aber der zugehörige Wunsch konnte nicht automatisch genehmigt werden. Bitte manuell prüfen.');
+            });
+    };
+
+    const reportMutationError = (action, error) => {
+        console.error(`[ServiceStaffing] ${action} fehlgeschlagen:`, error);
+        const detail = error?.message ? `: ${error.message}` : '';
+        toast.error(`${action} fehlgeschlagen${detail}. Die Daten wurden neu geladen.`, {
+            description: 'Falls das Problem wiederholt auftritt, bitte einen Administrator informieren.',
+        });
+        // Force a fresh read so the UI reflects the real server state.
+        queryClient.invalidateQueries(['shifts']);
+        queryClient.invalidateQueries(['wishes']);
+    };
+
     const updateShiftMutation = useMutation({
-        mutationFn: async ({ id, data }) => {
-             const shift = await db.ShiftEntry.update(id, data);
-
-             const fullShift = { ...allShifts.find(s => s.id === id), ...data };
-
-             // Auto-approve matching wishes
-             const matchingWish = wishes.find(w => 
-                w.doctor_id === fullShift.doctor_id && 
-                     isWishOnDate(w, fullShift.date) && 
-                w.type === 'service' && 
-                w.status === 'pending' &&
-                (!w.position || w.position === fullShift.position)
-             );
-
-             if (matchingWish) {
-                 await db.WishRequest.update(matchingWish.id, { 
-                    status: 'approved',
-                    user_viewed: false,
-                    admin_comment: 'Automatisch genehmigt durch Diensteinteilung'
-                });
-             }
-
-             return shift;
-        },
-        onSuccess: () => {
+        mutationFn: ({ id, data }) => db.ShiftEntry.update(id, data),
+        onSuccess: (_shift, { id, data }) => {
             trackDbChange();
             queryClient.invalidateQueries(['shifts']);
-            queryClient.invalidateQueries(['wishes']);
+            const fullShift = { ...allShifts.find(s => s.id === id), ...data };
+            approveMatchingWishSafe(fullShift);
         },
+        onError: (error) => reportMutationError('Dienst aktualisieren', error),
     });
 
     const createShiftMutation = useMutation({
-        mutationFn: async (data) => {
-             const shift = await db.ShiftEntry.create(data);
-
-             // Auto-approve matching wishes
-             const matchingWish = wishes.find(w => 
-                w.doctor_id === data.doctor_id && 
-                     isWishOnDate(w, data.date) && 
-                w.type === 'service' && 
-                w.status === 'pending' &&
-                (!w.position || w.position === data.position)
-             );
-
-             if (matchingWish) {
-                 await db.WishRequest.update(matchingWish.id, { 
-                    status: 'approved',
-                    user_viewed: false,
-                    admin_comment: 'Automatisch genehmigt durch Diensteinteilung'
-                });
-             }
-
-             return shift;
-        },
-        onSuccess: () => {
+        mutationFn: (data) => db.ShiftEntry.create(data),
+        onSuccess: (_shift, data) => {
             trackDbChange();
             queryClient.invalidateQueries(['shifts']);
-            queryClient.invalidateQueries(['wishes']);
+            approveMatchingWishSafe(data);
         },
+        onError: (error) => reportMutationError('Dienst eintragen', error),
     });
 
     const deleteShiftMutation = useMutation({
-        mutationFn: async (id) => {
-             await db.ShiftEntry.delete(id);
-        },
+        mutationFn: (id) => db.ShiftEntry.delete(id),
         onSuccess: () => {
             trackDbChange();
             queryClient.invalidateQueries(['shifts']);
         },
+        onError: (error) => reportMutationError('Dienst entfernen', error),
     });
 
     const handleAssignment = async (date, position, doctorId) => {

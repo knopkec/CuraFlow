@@ -205,7 +205,7 @@ export default function WishRequestDialog({
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="sm:max-w-[500px]">
+            <DialogContent className="sm:max-w-[500px]" data-testid="wish-request-dialog">
                 <DialogHeader>
                     <DialogTitle>
                         Wunsch für {format(date, 'EEEE, d. MMMM yyyy', { locale: de })}
@@ -267,6 +267,7 @@ export default function WishRequestDialog({
                                 <Label htmlFor="range-enabled" className="cursor-pointer">Zeitraum auswählen</Label>
                                 <input
                                     id="range-enabled"
+                                    data-testid="wish-range-enabled"
                                     type="checkbox"
                                     checked={formData.range_enabled}
                                     onChange={(e) => {
@@ -289,6 +290,7 @@ export default function WishRequestDialog({
                                     <div className="space-y-1">
                                         <Label>Von</Label>
                                         <Input
+                                            data-testid="wish-range-start"
                                             type="date"
                                             value={formData.range_start || ''}
                                             onChange={(e) => setFormData({ ...formData, range_start: e.target.value })}
@@ -300,6 +302,7 @@ export default function WishRequestDialog({
                                     <div className="space-y-1">
                                         <Label>Bis</Label>
                                         <Input
+                                            data-testid="wish-range-end"
                                             type="date"
                                             value={formData.range_end || ''}
                                             onChange={(e) => setFormData({ ...formData, range_end: e.target.value })}
@@ -323,14 +326,14 @@ export default function WishRequestDialog({
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <Label>Priorität</Label>
-                            <Select 
-                                value={formData.priority} 
-                                onValueChange={(val) => setFormData({...formData, priority: val})}
-                                disabled={(isReadOnly && !isAdmin) || isBlockedByDeadline || isBlockedByContract}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
+                                <Select 
+                                    value={formData.priority} 
+                                    onValueChange={(val) => setFormData({...formData, priority: val})}
+                                    disabled={(isReadOnly && !isAdmin) || isBlockedByDeadline || isBlockedByContract}
+                                >
+                                    <SelectTrigger data-testid="wish-priority-trigger">
+                                        <SelectValue />
+                                    </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="low">Niedrig</SelectItem>
                                     <SelectItem value="medium">Mittel</SelectItem>
@@ -343,6 +346,7 @@ export default function WishRequestDialog({
                     <div className="space-y-2">
                         <Label>Begründung (Optional)</Label>
                         <Textarea 
+                            data-testid="wish-reason-input"
                             placeholder="z.B. Hochzeit, Geburtstag, Fortbildung..." 
                             value={formData.reason}
                             onChange={(e) => setFormData({...formData, reason: e.target.value})}
@@ -367,7 +371,7 @@ export default function WishRequestDialog({
                                         onValueChange={(val) => setFormData({...formData, status: val})}
                                         disabled={!isAdmin}
                                     >
-                                        <SelectTrigger className={
+                                        <SelectTrigger data-testid="wish-admin-status-trigger" className={
                                             formData.status === 'approved' ? 'text-green-600 font-medium' :
                                             formData.status === 'rejected' ? 'text-red-600 font-medium' :
                                             'text-amber-600 font-medium'
@@ -387,6 +391,7 @@ export default function WishRequestDialog({
                             <div className="space-y-2">
                                 <Label>Kommentar (Admin)</Label>
                                 <Textarea 
+                                    data-testid="wish-admin-comment-input"
                                     placeholder="Begründung für Genehmigung/Ablehnung..." 
                                     value={formData.admin_comment}
                                     onChange={(e) => setFormData({...formData, admin_comment: e.target.value})}
@@ -402,6 +407,7 @@ export default function WishRequestDialog({
                 <DialogFooter className="sm:justify-between">
                     {wish ? (
                         <Button 
+                            data-testid="wish-delete-button"
                             variant="destructive" 
                             onClick={handleDelete}
                             disabled={isReadOnly && !isAdmin}
@@ -423,10 +429,10 @@ export default function WishRequestDialog({
                         <div />
                     )}
                     <div className="flex gap-2">
-                        <Button variant="outline" onClick={onClose} type="button">
+                        <Button data-testid="wish-cancel-button" variant="outline" onClick={onClose} type="button">
                             Abbrechen
                         </Button>
-                        <Button onClick={handleSubmit} disabled={(isReadOnly && !isAdmin) || isBlockedByDeadline || isBlockedByContract}>
+                        <Button data-testid="wish-save-button" onClick={handleSubmit} disabled={(isReadOnly && !isAdmin) || isBlockedByDeadline || isBlockedByContract}>
                             Speichern
                         </Button>
                     </div>
