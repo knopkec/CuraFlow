@@ -15,10 +15,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { api } from "@/api/client";
+import { getBuildInfo } from '@/lib/buildInfo';
 
 export default function AccountMenu() {
   const { user, logout } = useAuth();
   const { toast } = useToast();
+  const { commitSha, commitShortSha } = getBuildInfo();
   const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);
   const [isEmailDialogOpen, setIsEmailDialogOpen] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
@@ -138,6 +140,14 @@ export default function AccountMenu() {
             <div className="flex flex-col">
               <span className="font-medium">{user?.full_name || 'Mein Account'}</span>
               <span className="text-xs text-slate-500 font-normal">{user?.email}</span>
+              {commitShortSha && (
+                <span
+                  className="mt-1 font-mono text-[11px] text-slate-400 font-normal"
+                  title={commitSha || commitShortSha}
+                >
+                  Build {commitShortSha}
+                </span>
+              )}
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />

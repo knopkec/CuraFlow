@@ -1,6 +1,7 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { defineProject } from 'vitest/config'
+import { execSync } from 'node:child_process'
 import path from 'path'
 
 const coverageConfig = {
@@ -49,8 +50,45 @@ const componentProject = defineProject({
   },
 })
 
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim()
+    }
+  }
+  return ''
+}
+
+function resolveCommitSha() {
+  const explicitSha = firstNonEmptyString(
+    process.env.VITE_APP_COMMIT_SHA,
+    process.env.GITHUB_SHA,
+    process.env.SOURCE_COMMIT,
+  )
+  if (explicitSha) {
+    return explicitSha
+  }
+  try {
+    return execSync('git rev-parse HEAD', {
+      cwd: __dirname,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim()
+  } catch {
+    return ''
+  }
+}
+
+const appCommitSha = resolveCommitSha()
+const appCommitShortSha = appCommitSha ? appCommitSha.slice(0, 7) : ''
+
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    'globalThis.__CURAFLOW_BUILD_INFO__': JSON.stringify({
+      commitSha: appCommitSha,
+      commitShortSha: appCommitShortSha,
+    }),
+  },
   test: {
     projects: [unitProject, componentProject],
     coverage: coverageConfig,

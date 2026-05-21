@@ -26,6 +26,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        VITE_APP_COMMIT_SHA: ${VITE_APP_COMMIT_SHA:-}
     container_name: curaflow-demo-app
     restart: unless-stopped
     environment:

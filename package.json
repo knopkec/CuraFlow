@@ -26,7 +26,7 @@
     "test:db:down": "node ./scripts/with-test-env.js docker compose -f docker-compose.test.yml down -v --remove-orphans",
     "test:db:seed": "node ./scripts/with-test-env.js docker compose -f docker-compose.test.yml exec -T backend npm run seed:test-data",
     "docker:build": "docker build -t curaflow:local .",
-    "docker:demo:up": "docker compose --env-file .env.demo -f docker-compose.demo.yml up --build",
+    "docker:demo:up": "node ./scripts/with-build-sha.js docker compose --env-file .env.demo -f docker-compose.demo.yml up --build",
     "docker:demo:down": "docker compose --env-file .env.demo -f docker-compose.demo.yml down --remove-orphans",
     "docker:demo:reset": "docker compose --env-file .env.demo -f docker-compose.demo.yml down -v --remove-orphans",
     "docker:demo:smoke": "node ./scripts/run-demo-smoke.js"

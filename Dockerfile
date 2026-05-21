@@ -2,6 +2,9 @@ FROM node:22-slim AS frontend_builder
 
 WORKDIR /app
 
+ARG VITE_APP_COMMIT_SHA=""
+ENV VITE_APP_COMMIT_SHA=${VITE_APP_COMMIT_SHA}
+
 ENV npm_config_fetch_retries=5 \
     npm_config_fetch_retry_factor=2 \
     npm_config_fetch_retry_mintimeout=20000 \

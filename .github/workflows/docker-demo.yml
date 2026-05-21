@@ -110,6 +110,8 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
+          build-args: |
+            VITE_APP_COMMIT_SHA=${{ github.sha }}
           tags: |
             ${{ env.IMAGE_REF }}:latest
             ${{ env.IMAGE_REF }}:${{ env.IMAGE_TAG }}

@@ -161,8 +161,8 @@ function LayoutContent({ children }) {
         }`}
         onMouseEnter={() => setIsSidebarHovered(true)}
         onMouseLeave={() => setIsSidebarHovered(false)}
-      >
-        <div className="flex h-16 items-center justify-between border-b border-slate-100 px-4">
+        >
+          <div className="flex h-16 items-center justify-between border-b border-slate-100 px-4">
           <Link to={createPageUrl('Home')} className="flex items-center hover:opacity-80 transition-opacity">
             <img src="https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/6968fa78df93ab8a974bdc68/41f77f60e_Gemini_Generated_Image_184c7e184c7e184c.png" alt="CuraFlow" className="mr-2 h-8 w-8 object-contain" />
             <span className="text-lg font-bold tracking-tight text-slate-900">CuraFlow</span>
