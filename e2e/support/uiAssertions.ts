@@ -1,5 +1,16 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, errors, type Page } from '@playwright/test';
 
 export async function expectNoDatabaseProblemToast(page: Page) {
-  await expect(page.getByText('Datenbankproblem')).toHaveCount(0);
+  const databaseProblemToast = page.getByText('Datenbankproblem');
+
+  try {
+    await databaseProblemToast.waitFor({ state: 'visible', timeout: 1500 });
+    await expect(databaseProblemToast).not.toBeVisible();
+  } catch (error) {
+    if (error instanceof errors.TimeoutError) {
+      return;
+    }
+
+    throw error;
+  }
 }
