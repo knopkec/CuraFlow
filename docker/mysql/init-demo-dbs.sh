@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+
+if [ -z "${CURAFLOW_TENANT_DATABASE:-}" ]; then
+  echo "CURAFLOW_TENANT_DATABASE is required for demo MySQL initialization" >&2
+  exit 1
+fi
+
+mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" <<SQL
+CREATE DATABASE IF NOT EXISTS \`${CURAFLOW_TENANT_DATABASE}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+GRANT ALL PRIVILEGES ON \`${CURAFLOW_TENANT_DATABASE}\`.* TO '${MYSQL_USER}'@'%';
+FLUSH PRIVILEGES;
+SQL

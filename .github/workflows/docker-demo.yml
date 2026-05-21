@@ -1,0 +1,135 @@
+name: Docker Demo
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-demo-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: docker-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Create demo env file
+        shell: bash
+        run: |
+          add_env() {
+            printf '%s=%s\n' "$1" "$2" >> .env.demo
+          }
+
+          : > .env.demo
+          add_env MYSQL_ROOT_PASSWORD "$(openssl rand -hex 16)"
+          add_env MYSQL_DATABASE curaflow_demo_master
+          add_env MYSQL_USER curaflow
+          add_env MYSQL_PASSWORD "$(openssl rand -hex 16)"
+          add_env CURAFLOW_TENANT_DATABASE curaflow_demo_tenant
+          add_env JWT_SECRET "$(openssl rand -hex 32)"
+          add_env FRONTEND_URL http://localhost:3000
+          add_env ALLOWED_ORIGINS http://localhost:3000,http://127.0.0.1:3000
+          add_env APP_URL http://localhost:3000
+          add_env PUBLIC_APP_URL http://localhost:3000
+          add_env CURAFLOW_DEMO_TENANT_ID demo-tenant-main
+          add_env CURAFLOW_DEMO_TENANT_NAME "CuraFlow Demo Tenant"
+          add_env CURAFLOW_DEMO_ADMIN_PASSWORD "$(openssl rand -hex 12)"
+          add_env CURAFLOW_DEMO_USER_PASSWORD "$(openssl rand -hex 12)"
+          add_env CURAFLOW_DEMO_READONLY_PASSWORD "$(openssl rand -hex 12)"
+          add_env CURAFLOW_DEMO_RESET_PASSWORD "$(openssl rand -hex 12)"
+
+      - name: Build and start demo stack
+        run: docker compose --env-file .env.demo -f docker-compose.demo.yml up -d --build
+
+      - name: Run demo smoke checks
+        run: node ./scripts/run-demo-smoke.js
+
+      - name: Capture compose logs
+        if: failure()
+        run: docker compose --env-file .env.demo -f docker-compose.demo.yml logs --no-color > docker-demo.log
+
+      - name: Upload docker demo logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-demo-logs-${{ github.run_id }}
+          path: docker-demo.log
+          if-no-files-found: warn
+
+      - name: Stop demo stack
+        if: always()
+        run: docker compose --env-file .env.demo -f docker-compose.demo.yml down -v --remove-orphans
+
+  publish:
+    name: publish-ghcr
+    needs: smoke
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set image ref
+        shell: bash
+        run: |
+          echo "IMAGE_REF=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/curaflow" >> "$GITHUB_ENV"
+          echo "IMAGE_TAG=${GITHUB_SHA}" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_REF }}:latest
+            ${{ env.IMAGE_REF }}:${{ env.IMAGE_TAG }}
+
+      - name: Notify CaddyTower
+        shell: bash
+        env:
+          CADDYTOWER_DEPLOY_WEBHOOK_URL: ${{ secrets.CADDYTOWER_DEPLOY_WEBHOOK_URL }}
+          CADDYTOWER_DEPLOY_WEBHOOK_SECRET: ${{ secrets.CADDYTOWER_DEPLOY_WEBHOOK_SECRET }}
+        run: |
+          if [ -z "${CADDYTOWER_DEPLOY_WEBHOOK_URL:-}" ] || [ -z "${CADDYTOWER_DEPLOY_WEBHOOK_SECRET:-}" ]; then
+            echo "CaddyTower deploy webhook is not configured; skipping notification."
+            exit 0
+          fi
+
+          payload='{"ref":"'"${GITHUB_REF}"'","sha":"'"${GITHUB_SHA}"'","repository":"'"${GITHUB_REPOSITORY}"'"}'
+          printf '%s' "$payload" > payload.json
+          signature="sha256=$(openssl dgst -sha256 -hmac "$CADDYTOWER_DEPLOY_WEBHOOK_SECRET" payload.json | awk '{print $2}')"
+          curl --fail --show-error --silent \
+            --header "Content-Type: application/json" \
+            --header "X-Signature: $signature" \
+            --data @payload.json \
+            "$CADDYTOWER_DEPLOY_WEBHOOK_URL"

@@ -12,6 +12,7 @@ import { createPool } from 'mysql2/promise';
 import { parseDbToken } from './utils/crypto.js';
 import { runMasterMigrations } from './utils/masterMigrations.js';
 import { ensureColumns } from './utils/schema.js';
+import { resolveMasterDbConfig } from './utils/mysqlConfig.js';
 
 // Import routes
 import authRouter from './routes/auth.js';
@@ -195,6 +196,7 @@ const wrapPoolWithRetry = (pool, { poolLabel, onFinalFailure } = {}) => {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const masterDbConfig = resolveMasterDbConfig();
 
 // ===== Static frontend serving (Coolify / single-container deployment) =====
 // Must be BEFORE helmet/CORS/auth middleware so static files are served fast and clean.
@@ -218,11 +220,11 @@ app.set('trust proxy', 1);
 
 // Default MySQL Connection Pool
 export const db = wrapPoolWithRetry(createPool({
-  host: process.env.MYSQL_HOST,
-  port: parseInt(process.env.MYSQL_PORT || '3306'),
-  user: process.env.MYSQL_USER,
-  password: process.env.MYSQL_PASSWORD,
-  database: process.env.MYSQL_DATABASE,
+  host: masterDbConfig.host,
+  port: masterDbConfig.port,
+  user: masterDbConfig.user,
+  password: masterDbConfig.password,
+  database: masterDbConfig.database,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
@@ -584,7 +586,7 @@ app.use((req, res) => {
 app.listen(PORT, async () => {
   console.log(`🚀 CuraFlow Railway Server running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🗄️  Database: ${process.env.MYSQL_HOST}`);
+  console.log(`🗄️  Database: ${masterDbConfig.host}/${masterDbConfig.database}`);
 
   try {
     const migrationResults = await runMasterMigrations(db);

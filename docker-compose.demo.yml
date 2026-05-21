@@ -1,0 +1,66 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: curaflow-demo-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      CURAFLOW_TENANT_DATABASE: ${CURAFLOW_TENANT_DATABASE}
+    volumes:
+      - curaflow-demo-mysql:/var/lib/mysql
+      - ./docker/mysql/init-demo-dbs.sh:/docker-entrypoint-initdb.d/01-init-demo-dbs.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    ports:
+      - "33307:3306"
+
+  curaflow:
+    image: ${CURAFLOW_IMAGE:-curaflow:demo-local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: curaflow-demo-app
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      CURAFLOW_INSTANCE_KIND: demo
+      CURAFLOW_DEMO_SEED: "1"
+      MYSQL_URL: ${MYSQL_USER}:${MYSQL_PASSWORD}@tcp(mysql:3306)/${MYSQL_DATABASE}?parseTime=true
+      CURAFLOW_TENANT_MYSQL_URL: ${MYSQL_USER}:${MYSQL_PASSWORD}@tcp(mysql:3306)/${CURAFLOW_TENANT_DATABASE}?parseTime=true
+      JWT_SECRET: ${JWT_SECRET}
+      FRONTEND_URL: ${FRONTEND_URL}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+      APP_URL: ${APP_URL}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL}
+      CURAFLOW_DEMO_TENANT_ID: ${CURAFLOW_DEMO_TENANT_ID}
+      CURAFLOW_DEMO_TENANT_NAME: ${CURAFLOW_DEMO_TENANT_NAME}
+      CURAFLOW_DEMO_ADMIN_PASSWORD: ${CURAFLOW_DEMO_ADMIN_PASSWORD}
+      CURAFLOW_DEMO_USER_PASSWORD: ${CURAFLOW_DEMO_USER_PASSWORD}
+      CURAFLOW_DEMO_READONLY_PASSWORD: ${CURAFLOW_DEMO_READONLY_PASSWORD}
+      CURAFLOW_DEMO_RESET_PASSWORD: ${CURAFLOW_DEMO_RESET_PASSWORD}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:3000/health').then((res)=>process.exit(res.ok?0:1)).catch(()=>process.exit(1))\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    ports:
+      - "3000:3000"
+
+volumes:
+  curaflow-demo-mysql:

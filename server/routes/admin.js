@@ -8,6 +8,7 @@ import { authMiddleware, adminMiddleware } from './auth.js';
 import { clearColumnsCache, writeAuditLog } from './dbProxy.js';
 import { checkAndSendWishReminders } from '../utils/wishReminder.js';
 import { runTenantMigrations } from '../utils/tenantMigrations.js';
+import { resolveMasterDbConfig } from '../utils/mysqlConfig.js';
 
 const router = express.Router();
 
@@ -44,13 +45,13 @@ router.post('/tools', async (req, res, next) => {
     switch (action) {
       case 'generate_db_token': {
         console.log('Generating DB token from environment variables...');
-        // Generate token from environment variables
+        const masterDbConfig = resolveMasterDbConfig();
         const config = {
-          host: process.env.MYSQL_HOST?.trim(),
-          user: process.env.MYSQL_USER?.trim(),
-          password: process.env.MYSQL_PASSWORD?.trim(),
-          database: process.env.MYSQL_DATABASE?.trim(),
-          port: parseInt(process.env.MYSQL_PORT?.trim() || '3306')
+          host: masterDbConfig.host,
+          user: masterDbConfig.user,
+          password: masterDbConfig.password,
+          database: masterDbConfig.database,
+          port: masterDbConfig.port,
         };
 
         if (!config.host || !config.user) {

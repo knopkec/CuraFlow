@@ -3,16 +3,14 @@ FROM node:22-slim AS frontend_builder
 WORKDIR /app
 
 ENV npm_config_fetch_retries=5 \
-	npm_config_fetch_retry_factor=2 \
-	npm_config_fetch_retry_mintimeout=20000 \
-	npm_config_fetch_retry_maxtimeout=120000
+    npm_config_fetch_retry_factor=2 \
+    npm_config_fetch_retry_mintimeout=20000 \
+    npm_config_fetch_retry_maxtimeout=120000
 
-# Install frontend dependencies with lockfile for reproducible builds.
 COPY package*.json ./
 RUN --mount=type=cache,target=/root/.npm \
-	npm ci --no-audit --prefer-offline
+    npm ci --no-audit --prefer-offline
 
-# Copy frontend sources and build both Vite entry points (index.html + master.html).
 COPY src ./src
 COPY public ./public
 COPY index.html master.html vite.config.js jsconfig.json postcss.config.js tailwind.config.js components.json ./
@@ -23,31 +21,25 @@ FROM node:22-slim AS runtime
 WORKDIR /app/server
 
 ENV npm_config_fetch_retries=5 \
-	npm_config_fetch_retry_factor=2 \
-	npm_config_fetch_retry_mintimeout=20000 \
-	npm_config_fetch_retry_maxtimeout=120000
+    npm_config_fetch_retry_factor=2 \
+    npm_config_fetch_retry_mintimeout=20000 \
+    npm_config_fetch_retry_maxtimeout=120000
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends poppler-utils \
  && rm -rf /var/lib/apt/lists/*
 
-# Install backend runtime dependencies only.
 COPY server/package*.json ./
 RUN --mount=type=cache,target=/root/.npm \
-	npm ci --omit=dev --no-audit --prefer-offline \
- && npm cache clean --force
+    npm ci --omit=dev --no-audit --prefer-offline
 
-# Copy backend source code.
 COPY server/ ./
-
-# Copy built frontend artifacts so Express can serve both frontend apps.
 COPY --from=frontend_builder /app/dist /app/dist
 COPY docker/entrypoint.sh /usr/local/bin/curaflow-entrypoint.sh
 RUN chmod +x /usr/local/bin/curaflow-entrypoint.sh
 
 ENV NODE_ENV=production
 
-# Coolify maps a public port to this container port.
 EXPOSE 3000
 
 ENTRYPOINT ["/usr/local/bin/curaflow-entrypoint.sh"]

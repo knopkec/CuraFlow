@@ -1,160 +1,4 @@
-import bcrypt from 'bcryptjs';
-import mysql from 'mysql2/promise';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { encryptToken } from '../utils/crypto.js';
-import { runMasterMigrations } from '../utils/masterMigrations.js';
-import { assertSafeIdentifier, assertSafeTestEnvironment } from './seed-test-data-safety.js';
-import { runTenantMigrations } from '../utils/tenantMigrations.js';
-import { ensureMasterBaseTables } from './seed-runtime-shared.js';
-
-const MASTER_DB_NAME = process.env.MYSQL_DATABASE || 'curaflow_test_master';
-const TENANT_DB_NAME = process.env.TEST_TENANT_DATABASE || 'curaflow_test_tenant';
-const TENANT_ID = process.env.TEST_TENANT_ID || 'tenant-main';
-const TENANT_NAME = process.env.TEST_TENANT_NAME || 'CuraFlow Test Tenant';
-const TARGET_MONTH = process.env.TEST_TARGET_MONTH || '2026-05';
-const MYSQL_HOST = process.env.MYSQL_HOST || '127.0.0.1';
-const MYSQL_PORT = Number(process.env.MYSQL_PORT || '3306');
-const MYSQL_USER = process.env.MYSQL_USER || 'curaflow';
-const MYSQL_PASSWORD = process.env.MYSQL_PASSWORD || '';
-const MYSQL_ROOT_PASSWORD = process.env.MYSQL_ROOT_PASSWORD || '';
-function requiredEnv(name) {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`${name} is required for seed-test-data.js`);
-  }
-  return value;
-}
-
-const USER_PASSWORDS = {
-  admin: requiredEnv('SEED_ADMIN_PASSWORD'),
-  user: requiredEnv('SEED_USER_PASSWORD'),
-  readonly: requiredEnv('SEED_READONLY_PASSWORD'),
-};
-
-const teamRoles = [
-  ['role-chief', 'Chefarzt', 0, true, false, true, false, 'Oberste Führungsebene'],
-  ['role-senior', 'Oberarzt', 1, true, false, true, false, 'Kann Hintergrunddienste übernehmen'],
-  ['role-specialist', 'Facharzt', 2, true, true, true, false, 'Kann alle Dienste übernehmen'],
-  ['role-resident', 'Assistenzarzt', 3, false, true, false, false, 'Kann Vordergrunddienste übernehmen'],
-  ['role-non-rad', 'Nicht-Radiologe', 4, false, false, false, true, 'Wird in Statistiken nicht gezählt'],
-];
-
-const doctors = [
-  ['doctor-anna', 'Anna Adler', 'AA', 'Facharzt', 'anna.adler@test.local', 'anna.adler@test.local', 1, true, false, true, 38.5],
-  ['doctor-bruno', 'Bruno Berg', 'BB', 'Oberarzt', 'bruno.berg@test.local', 'bruno.berg@test.local', 2, true, false, true, 40.0],
-  ['doctor-clara', 'Clara Conrad', 'CC', 'Assistenzarzt', 'clara.conrad@test.local', 'clara.conrad@test.local', 3, true, false, true, 35.0],
-  ['doctor-david', 'David Dorn', 'DD', 'Facharzt', 'david.dorn@test.local', 'david.dorn@test.local', 4, true, false, true, 30.0],
-  ['doctor-emma', 'Emma Eber', 'EE', 'Nicht-Radiologe', 'emma.eber@test.local', 'emma.eber@test.local', 5, true, true, false, 20.0],
-];
-
-const workplaces = [
-  ['workplace-foreground', 'Dienst Vordergrund', 'Dienste', 1, true, false, 1, false, 1, 1],
-  ['workplace-background', 'Dienst Hintergrund', 'Dienste', 2, true, false, 2, false, 1, 1],
-  ['workplace-ct', 'CT', 'Dienste', 3, true, false, 2, false, 1, 2],
-  ['workplace-mrt', 'MRT Rotation', 'Rotationen', 4, true, true, null, false, 1, 1],
-  ['workplace-sono', 'Sono Rotation', 'Rotationen', 5, true, true, null, false, 1, 1],
-  ['workplace-demo', 'Demo / Konsil', 'Demonstrationen & Konsile', 6, true, true, null, false, 1, 1],
-];
-
-const qualifications = [
-  ['qualification-radiation', 'Strahlenschutz', 'SS', 'Berechtigung für strahlenrelevante Dienste', 'Pflicht', 1, true, 60],
-  ['qualification-mri', 'MRT', 'MRT', 'MRT-Fachkunde', 'Fachlich', 2, false, null],
-];
-
-const doctorQualifications = [
-  ['doctor-qualification-anna-radiation', 'doctor-anna', 'qualification-radiation', '2024-01-01', '2029-01-01'],
-  ['doctor-qualification-bruno-radiation', 'doctor-bruno', 'qualification-radiation', '2023-06-01', '2028-06-01'],
-  ['doctor-qualification-clara-mri', 'doctor-clara', 'qualification-mri', '2024-09-01', null],
-];
-
-const workplaceQualifications = [
-  ['workplace-qualification-ct-radiation', 'workplace-ct', 'qualification-radiation', true, false],
-  ['workplace-qualification-mrt-mri', 'workplace-mrt', 'qualification-mri', true, false],
-];
-
-const shiftEntries = [
-  ['shift-2026-05-05-foreground', `${TARGET_MONTH}-05`, 'doctor-anna', 'Dienst Vordergrund', 1],
-  ['shift-2026-05-05-background', `${TARGET_MONTH}-05`, 'doctor-bruno', 'Dienst Hintergrund', 2],
-  ['shift-2026-05-06-ct', `${TARGET_MONTH}-06`, 'doctor-clara', 'CT', 3],
-  ['shift-2026-05-06-mrt', `${TARGET_MONTH}-06`, 'doctor-david', 'MRT Rotation', 4],
-];
-
-const wishRequests = [
-  ['wish-anna-may', 'doctor-anna', TARGET_MONTH, `${TARGET_MONTH}-12`, `${TARGET_MONTH}-12`, `${TARGET_MONTH}-12`, 'Dienst Vordergrund', 'service', 'approved', 'medium', 'Frühdienst bevorzugt', null, 'Frühdienst bevorzugt', false, null, null],
-];
-
-const trainingRotations = [
-  ['training-clara-mrt', 'doctor-clara', 'MRT Einarbeitung', 'workplace-mrt', 'MRT Rotation', `${TARGET_MONTH}-10`, `${TARGET_MONTH}-14`, 'planned', 'Begleitung durch Oberarzt'],
-];
-
-const staffingPlanEntries = [
-  ['staffing-clara-current-month', 'doctor-clara', Number(TARGET_MONTH.slice(0, 4)), Number(TARGET_MONTH.slice(5, 7)), '1.0'],
-];
-
-const customHolidays = [
-  ['holiday-lab-day', 'Testfeiertag', `${TARGET_MONTH}-01`, 'NW'],
-];
-
-const systemSettings = [
-  ['system-setting-wish-deadline', 'wish_deadline_months', '2'],
-  [
-    'system-setting-wish-approval',
-    'wish_approval_rules',
-    JSON.stringify({
-      service_requires_approval: true,
-      no_service_requires_approval: true,
-      auto_create_shift_on_approval: false,
-      exceptions: {},
-    }),
-  ],
-  ['system-setting-wish-reminder', 'wish_reminder_email_enabled', 'true'],
-];
-
-const colorSettings = [
-  ['color-setting-vacation', 'Urlaub', 'position', '#22c55e', '#ffffff'],
-  ['color-setting-services', 'Dienste', 'section', '#dbeafe', '#1e3a8a'],
-];
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function createPool({ database, user, password }) {
-  return mysql.createPool({
-    host: MYSQL_HOST,
-    port: MYSQL_PORT,
-    user,
-    password,
-    database,
-    waitForConnections: true,
-    connectionLimit: 5,
-    queueLimit: 0,
-    dateStrings: true,
-    timezone: '+00:00',
-  });
-}
-
-async function waitForPool(label, factory, attempts = 30) {
-  let lastError = null;
-
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    let pool;
-    try {
-      pool = factory();
-      await pool.query('SELECT 1');
-      console.log(`[seed] Connected to ${label} (${attempt}/${attempts})`);
-      return pool;
-    } catch (error) {
-      lastError = error;
-      await pool?.end().catch(() => {});
-      console.warn(`[seed] Waiting for ${label}: ${error.message}`);
-      await sleep(2000);
-    }
-  }
-
-  throw lastError ?? new Error(`Failed to connect to ${label}`);
-}
+import { ensureColumns, hasTable } from '../utils/schema.js';
 
 async function executeStatements(pool, statements) {
   for (const statement of statements) {
@@ -162,16 +6,62 @@ async function executeStatements(pool, statements) {
   }
 }
 
-async function ensureTenantDatabase(rootPool) {
-  assertSafeIdentifier(TENANT_DB_NAME, 'TEST_TENANT_DATABASE');
-  assertSafeIdentifier(MYSQL_USER, 'MYSQL_USER');
+export async function ensureMasterBaseTables(masterPool) {
+  await executeStatements(masterPool, [
+    `CREATE TABLE IF NOT EXISTS app_users (
+      id VARCHAR(36) PRIMARY KEY,
+      email VARCHAR(255) NOT NULL UNIQUE,
+      password_hash VARCHAR(255) NOT NULL,
+      full_name VARCHAR(255) DEFAULT '',
+      role ENUM('admin', 'user', 'readonly') NOT NULL DEFAULT 'user',
+      doctor_id VARCHAR(36) DEFAULT NULL,
+      is_active TINYINT(1) DEFAULT 1,
+      allowed_tenants JSON DEFAULT NULL,
+      must_change_password TINYINT(1) DEFAULT 0,
+      theme VARCHAR(50) DEFAULT 'default',
+      section_config JSON DEFAULT NULL,
+      collapsed_sections JSON DEFAULT NULL,
+      schedule_hidden_rows JSON DEFAULT NULL,
+      schedule_show_sidebar TINYINT(1) DEFAULT 1,
+      schedule_show_time_account TINYINT(1) DEFAULT 0,
+      schedule_initials_only TINYINT(1) DEFAULT 0,
+      schedule_sort_doctors_alphabetically TINYINT(1) DEFAULT 0,
+      highlight_my_name TINYINT(1) DEFAULT 0,
+      grid_font_size VARCHAR(20) DEFAULT 'normal',
+      wish_show_occupied TINYINT(1) DEFAULT 1,
+      wish_show_absences TINYINT(1) DEFAULT 1,
+      wish_hidden_doctors JSON DEFAULT NULL,
+      email_verified TINYINT(1) DEFAULT 0,
+      email_verified_date DATETIME DEFAULT NULL,
+      last_login DATETIME DEFAULT NULL,
+      last_seen_at DATETIME DEFAULT NULL,
+      created_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_date DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+    `CREATE TABLE IF NOT EXISTS db_tokens (
+      id VARCHAR(36) PRIMARY KEY,
+      name VARCHAR(100) NOT NULL,
+      token TEXT NOT NULL,
+      host VARCHAR(255),
+      db_name VARCHAR(100),
+      description TEXT,
+      is_active TINYINT(1) DEFAULT 0,
+      created_by VARCHAR(255),
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+  ]);
 
-  await rootPool.execute(`CREATE DATABASE IF NOT EXISTS \`${TENANT_DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
-  await rootPool.query(`GRANT ALL PRIVILEGES ON \`${TENANT_DB_NAME}\`.* TO '${MYSQL_USER}'@'%'`);
-  await rootPool.query('FLUSH PRIVILEGES');
+  if (await hasTable(masterPool, 'SystemLog')) {
+    await ensureColumns(masterPool, 'SystemLog', [
+      ['details', 'TEXT DEFAULT NULL'],
+      ['updated_date', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'],
+      ['created_by', 'VARCHAR(255) DEFAULT NULL'],
+    ]);
+  }
 }
 
-async function ensureTenantBaseTables(tenantPool) {
+export async function ensureTenantBaseTables(tenantPool) {
   await executeStatements(tenantPool, [
     `CREATE TABLE IF NOT EXISTS Doctor (
       id VARCHAR(36) PRIMARY KEY,
@@ -350,10 +240,10 @@ async function ensureTenantBaseTables(tenantPool) {
       level VARCHAR(20) DEFAULT NULL,
       source VARCHAR(100) DEFAULT NULL,
       message TEXT DEFAULT NULL,
-        details TEXT,
-        created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        created_by VARCHAR(255)
+      details TEXT,
+      created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      created_by VARCHAR(255)
     ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
     `CREATE TABLE IF NOT EXISTS VoiceAlias (
       id VARCHAR(36) PRIMARY KEY,
@@ -440,7 +330,7 @@ async function ensureTenantBaseTables(tenantPool) {
   ]);
 }
 
-async function upsertRows(pool, tableName, columns, rows) {
+export async function upsertRows(pool, tableName, columns, rows) {
   const placeholders = columns.map(() => '?').join(', ');
   const updates = columns
     .filter((column) => column !== 'id')
@@ -456,180 +346,4 @@ async function upsertRows(pool, tableName, columns, rows) {
   for (const row of rows) {
     await pool.execute(sql, row);
   }
-}
-
-async function upsertMasterUsers(masterPool) {
-  const users = [
-    ['user-admin', 'admin@test.local', await bcrypt.hash(USER_PASSWORDS.admin, 10), 'Test Admin', 'admin', 'doctor-anna', 1, JSON.stringify([TENANT_ID]), 0, 1],
-    ['user-standard', 'user@test.local', await bcrypt.hash(USER_PASSWORDS.user, 10), 'Test User', 'user', 'doctor-clara', 1, JSON.stringify([TENANT_ID]), 0, 1],
-    ['user-readonly', 'readonly@test.local', await bcrypt.hash(USER_PASSWORDS.readonly, 10), 'Test Readonly', 'readonly', 'doctor-emma', 1, JSON.stringify([TENANT_ID]), 1, 1],
-  ];
-
-  await upsertRows(
-    masterPool,
-    'app_users',
-    ['id', 'email', 'password_hash', 'full_name', 'role', 'doctor_id', 'is_active', 'allowed_tenants', 'must_change_password', 'email_verified'],
-    users
-  );
-}
-
-async function upsertDbToken(masterPool) {
-  const encryptedToken = encryptToken(
-    JSON.stringify({
-      host: MYSQL_HOST,
-      port: MYSQL_PORT,
-      user: MYSQL_USER,
-      password: MYSQL_PASSWORD,
-      database: TENANT_DB_NAME,
-    })
-  );
-
-  await masterPool.execute('UPDATE db_tokens SET is_active = 0 WHERE id != ? AND is_active = 1', [TENANT_ID]);
-  await upsertRows(
-    masterPool,
-    'db_tokens',
-    ['id', 'name', 'token', 'host', 'db_name', 'description', 'is_active', 'created_by'],
-    [[TENANT_ID, TENANT_NAME, encryptedToken, MYSQL_HOST, TENANT_DB_NAME, 'Seeded deterministic tenant for UI tests', 1, 'seed-script']]
-  );
-}
-
-async function seedTenantData(tenantPool) {
-  await upsertRows(
-    tenantPool,
-    'TeamRole',
-    ['id', 'name', 'priority', 'is_specialist', 'can_do_foreground_duty', 'can_do_background_duty', 'excluded_from_statistics', 'description'],
-    teamRoles
-  );
-
-  await upsertRows(
-    tenantPool,
-    'Doctor',
-    ['id', 'name', 'initials', 'role', 'email', 'google_email', 'order', 'is_active', 'exclude_from_staffing_plan', 'receive_email_notifications', 'target_weekly_hours'],
-    doctors
-  );
-
-  await upsertRows(
-    tenantPool,
-    'Workplace',
-    ['id', 'name', 'category', 'order', 'is_active', 'allows_multiple', 'service_type', 'allows_absence_overlap', 'min_staff', 'optimal_staff'],
-    workplaces
-  );
-
-  await upsertRows(
-    tenantPool,
-    'Qualification',
-    ['id', 'name', 'short_label', 'description', 'category', 'order', 'requires_certificate', 'certificate_validity_months'],
-    qualifications
-  );
-
-  await upsertRows(
-    tenantPool,
-    'DoctorQualification',
-    ['id', 'doctor_id', 'qualification_id', 'granted_date', 'expiry_date'],
-    doctorQualifications
-  );
-
-  await upsertRows(
-    tenantPool,
-    'WorkplaceQualification',
-    ['id', 'workplace_id', 'qualification_id', 'is_mandatory', 'is_excluded'],
-    workplaceQualifications
-  );
-
-  await upsertRows(
-    tenantPool,
-    'ShiftEntry',
-    ['id', 'date', 'doctor_id', 'position', 'order'],
-    shiftEntries
-  );
-
-  await upsertRows(
-    tenantPool,
-    'WishRequest',
-    ['id', 'doctor_id', 'target_month', 'date', 'start_date', 'end_date', 'position', 'type', 'status', 'priority', 'reason', 'admin_comment', 'comment', 'user_viewed', 'range_start', 'range_end'],
-    wishRequests
-  );
-
-  await upsertRows(
-    tenantPool,
-    'TrainingRotation',
-    ['id', 'doctor_id', 'title', 'workplace_id', 'modality', 'start_date', 'end_date', 'status', 'notes'],
-    trainingRotations
-  );
-
-  await upsertRows(
-    tenantPool,
-    'StaffingPlanEntry',
-    ['id', 'doctor_id', 'year', 'month', 'value'],
-    staffingPlanEntries
-  );
-
-  await upsertRows(
-    tenantPool,
-    'CustomHoliday',
-    ['id', 'name', 'date', 'state_code'],
-    customHolidays
-  );
-
-  await upsertRows(
-    tenantPool,
-    'SystemSetting',
-    ['id', 'key', 'value'],
-    systemSettings
-  );
-
-  await upsertRows(
-    tenantPool,
-    'ColorSetting',
-    ['id', 'name', 'category', 'bg_color', 'text_color'],
-    colorSettings
-  );
-}
-
-async function main() {
-  console.log('[seed] Starting deterministic test data seed');
-  console.log(`[seed] Master DB: ${MASTER_DB_NAME}`);
-  console.log(`[seed] Tenant DB: ${TENANT_DB_NAME}`);
-  assertSafeTestEnvironment();
-
-  let rootPool;
-  let masterPool;
-  let tenantPool;
-
-  try {
-    rootPool = await waitForPool('mysql root', () => createPool({ user: 'root', password: MYSQL_ROOT_PASSWORD }));
-    await ensureTenantDatabase(rootPool);
-
-    masterPool = await waitForPool('master database', () => createPool({ database: MASTER_DB_NAME, user: MYSQL_USER, password: MYSQL_PASSWORD }));
-    await ensureMasterBaseTables(masterPool);
-    await runMasterMigrations(masterPool);
-
-    tenantPool = await waitForPool('tenant database', () => createPool({ database: TENANT_DB_NAME, user: MYSQL_USER, password: MYSQL_PASSWORD }));
-    await ensureTenantBaseTables(tenantPool);
-    await runTenantMigrations(tenantPool, TENANT_ID);
-
-    await upsertDbToken(masterPool);
-    await upsertMasterUsers(masterPool);
-    await seedTenantData(tenantPool);
-
-    console.log('[seed] Done');
-    console.log('  test users seeded: 3 (roles: admin, user, readonly)');
-    console.log(`[seed] Tenant token id: ${TENANT_ID}`);
-  } finally {
-    await Promise.all([
-      tenantPool?.end().catch(() => {}),
-      masterPool?.end().catch(() => {}),
-      rootPool?.end().catch(() => {}),
-    ]);
-  }
-}
-
-const currentFilePath = fileURLToPath(import.meta.url);
-const isDirectRun = process.argv[1] ? path.resolve(process.argv[1]) === currentFilePath : false;
-
-if (isDirectRun) {
-  main().catch((error) => {
-    console.error('[seed] Failed:', error);
-    process.exitCode = 1;
-  });
 }
