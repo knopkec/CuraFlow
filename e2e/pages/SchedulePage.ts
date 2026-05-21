@@ -1,5 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
+import { expectNoDatabaseProblemToast } from '../support/uiAssertions';
+
 export class SchedulePage {
   readonly page: Page;
   readonly root: Locator;
@@ -31,6 +33,7 @@ export class SchedulePage {
   async expectLoaded() {
     await expect(this.root).toBeVisible();
     await expect(this.currentPeriodLabel).toBeVisible();
+    await expectNoDatabaseProblemToast(this.page);
   }
 
   shift(shiftId: string) {

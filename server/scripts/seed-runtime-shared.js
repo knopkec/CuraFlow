@@ -217,6 +217,7 @@ export async function ensureTenantBaseTables(tenantPool) {
       doctor_id VARCHAR(36) DEFAULT NULL,
       type VARCHAR(50) DEFAULT NULL,
       status VARCHAR(32) DEFAULT 'pending',
+      acknowledged TINYINT(1) DEFAULT 0,
       sent_at DATETIME DEFAULT NULL,
       created_date DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
       updated_date DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
@@ -327,6 +328,10 @@ export async function ensureTenantBaseTables(tenantPool) {
       updated_date DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       UNIQUE KEY unique_block (date, position, timeslot_id)
     ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+  ]);
+
+  await ensureColumns(tenantPool, 'ShiftNotification', [
+    ['acknowledged', 'TINYINT(1) DEFAULT 0'],
   ]);
 }
 

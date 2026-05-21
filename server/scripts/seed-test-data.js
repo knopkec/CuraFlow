@@ -7,6 +7,7 @@ import { runMasterMigrations } from '../utils/masterMigrations.js';
 import { assertSafeIdentifier, assertSafeTestEnvironment } from './seed-test-data-safety.js';
 import { runTenantMigrations } from '../utils/tenantMigrations.js';
 import { ensureMasterBaseTables } from './seed-runtime-shared.js';
+import { ensureColumns } from '../utils/schema.js';
 
 const MASTER_DB_NAME = process.env.MYSQL_DATABASE || 'curaflow_test_master';
 const TENANT_DB_NAME = process.env.TEST_TENANT_DATABASE || 'curaflow_test_tenant';
@@ -327,6 +328,7 @@ async function ensureTenantBaseTables(tenantPool) {
       doctor_id VARCHAR(36) DEFAULT NULL,
       type VARCHAR(50) DEFAULT NULL,
       status VARCHAR(32) DEFAULT 'pending',
+      acknowledged TINYINT(1) DEFAULT 0,
       sent_at DATETIME DEFAULT NULL,
       created_date DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
       updated_date DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
@@ -437,6 +439,10 @@ async function ensureTenantBaseTables(tenantPool) {
       updated_date DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       UNIQUE KEY unique_block (date, position, timeslot_id)
     ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+  ]);
+
+  await ensureColumns(tenantPool, 'ShiftNotification', [
+    ['acknowledged', 'TINYINT(1) DEFAULT 0'],
   ]);
 }
 

@@ -1,5 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
+import { expectNoDatabaseProblemToast } from '../support/uiAssertions';
+
 export class AppShellPage {
   readonly shell: Locator;
   readonly sidebar: Locator;
@@ -31,6 +33,7 @@ export class AppShellPage {
 
   async expectReady() {
     await expect(this.shell).toBeVisible();
+    await expectNoDatabaseProblemToast(this.page);
   }
 
   async expectOnSchedulePage() {
@@ -52,6 +55,7 @@ export class AppShellPage {
     await this.adminLink.click();
     await expect(this.page).toHaveURL(/\/admin(?:\?|$)/);
     await expect(this.adminPage).toBeVisible();
+    await expectNoDatabaseProblemToast(this.page);
   }
 
   async gotoStaff() {
@@ -59,6 +63,7 @@ export class AppShellPage {
     await this.staffLink.click();
     await expect(this.page).toHaveURL(/\/staff(?:\?|$)/);
     await expect(this.staffPage).toBeVisible();
+    await expectNoDatabaseProblemToast(this.page);
   }
 
   async logout() {

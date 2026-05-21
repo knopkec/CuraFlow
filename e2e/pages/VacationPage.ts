@@ -1,5 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
+import { expectNoDatabaseProblemToast } from '../support/uiAssertions';
+
 export class VacationPage {
   readonly page: Page;
   readonly root: Locator;
@@ -29,6 +31,7 @@ export class VacationPage {
   async expectLoaded() {
     await expect(this.page).toHaveURL(/\/vacation(?:\?|$)/);
     await expect(this.root).toBeVisible();
+    await expectNoDatabaseProblemToast(this.page);
   }
 
   dayCell(date: string) {

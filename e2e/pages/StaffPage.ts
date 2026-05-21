@@ -1,5 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
+import { expectNoDatabaseProblemToast } from '../support/uiAssertions';
+
 type StaffDoctorFormData = {
   name?: string;
   initials?: string;
@@ -45,6 +47,7 @@ export class StaffPage {
   async expectLoaded() {
     await expect(this.page).toHaveURL(/\/staff(?:\?|$)/);
     await expect(this.pageRoot).toBeVisible();
+    await expectNoDatabaseProblemToast(this.page);
   }
 
   doctorCard(doctorId: string) {

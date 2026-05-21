@@ -1,5 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
+import { expectNoDatabaseProblemToast } from '../support/uiAssertions';
+
 function getOptionTestId(prefix: string, value: string) {
   return `${prefix}${value}`;
 }
@@ -37,6 +39,7 @@ export class WishListPage {
   async expectLoaded() {
     await expect(this.page).toHaveURL(/\/wishlist(?:\?|$)/);
     await expect(this.root).toBeVisible();
+    await expectNoDatabaseProblemToast(this.page);
   }
 
   dayCell(date: string) {

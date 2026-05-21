@@ -1,5 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
+import { expectNoDatabaseProblemToast } from '../support/uiAssertions';
+
 export class StatisticsPage {
   readonly pageRoot: Locator;
   readonly yearTrigger: Locator;
@@ -37,6 +39,7 @@ export class StatisticsPage {
   async expectLoaded() {
     await expect(this.page).toHaveURL(/\/statistics(?:\?|$)/);
     await expect(this.pageRoot).toBeVisible();
+    await expectNoDatabaseProblemToast(this.page);
   }
 
   async selectYear(year: string) {

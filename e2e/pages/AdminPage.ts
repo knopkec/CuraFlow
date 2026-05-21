@@ -1,5 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
+import { expectNoDatabaseProblemToast } from '../support/uiAssertions';
+
 type AdminUserFormData = {
   email?: string;
   fullName?: string;
@@ -49,6 +51,7 @@ export class AdminPage {
   async expectLoaded() {
     await expect(this.page).toHaveURL(/\/admin(?:\?|$)/);
     await expect(this.pageRoot).toBeVisible();
+    await expectNoDatabaseProblemToast(this.page);
   }
 
   userRow(userId: string) {
