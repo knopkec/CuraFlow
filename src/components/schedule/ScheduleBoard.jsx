@@ -29,7 +29,7 @@ import { generateSuggestions } from './autoFillEngine';
 import AutoFillSettingsDialog from './AutoFillSettingsDialog';
 import ColorSettingsDialog, { DEFAULT_COLORS } from '@/components/settings/ColorSettingsDialog';
 import FreeTextCell from './FreeTextCell';
-import { getWishEndDate, getWishStartDate, isWishOnDate } from '@/utils/wishRange';
+import { isWishOnDate } from '@/utils/wishRange';
 import { useShiftValidation } from '@/components/validation/useShiftValidation';
 import { useOverrideValidation } from '@/components/validation/useOverrideValidation';
 import { useAllDoctorQualifications, useAllWorkplaceQualifications } from '@/hooks/useQualifications';
@@ -83,7 +83,6 @@ const SECTION_TABS_KEY = 'schedule_section_tabs';
 const PINNED_SECTION_TITLE = 'Anwesenheiten';
 const SPLIT_PANEL_PREFIX = 'split::';
 const SPLIT_DRAG_PREFIX = 'split-';
-const SCHEDULE_BACKGROUND_FETCH_LIMIT = 50000;
 
 const withPanelPrefix = (id, prefix = '') => `${prefix}${id}`;
 const stripPanelPrefix = (id = '') => (id.startsWith(SPLIT_PANEL_PREFIX) ? id.slice(SPLIT_PANEL_PREFIX.length) : id);
@@ -986,28 +985,12 @@ export default function ScheduleBoard() {
 
   const { data: wishes = [] } = useQuery({
     queryKey: ['wishes', fetchRange.start, fetchRange.end],
-    queryFn: async () => {
-      const visibleStart = format(subDays(new Date(`${fetchRange.start}T00:00:00`), 370), 'yyyy-MM-dd');
-      const visibleEnd = format(addDays(new Date(`${fetchRange.end}T00:00:00`), 370), 'yyyy-MM-dd');
-      const visibleStartMonth = visibleStart.slice(0, 7);
-      const visibleEndMonth = visibleEnd.slice(0, 7);
-      const fetchedWishes = await db.WishRequest.list({ limit: SCHEDULE_BACKGROUND_FETCH_LIMIT, sort: '-target_month' });
-
-      return fetchedWishes.filter((wish) => {
-        const wishStart = getWishStartDate(wish);
-        const wishEnd = getWishEndDate(wish);
-
-        if (wishStart && wishEnd) {
-          return wishEnd >= visibleStart && wishStart <= visibleEnd;
-        }
-
-        if (wish.target_month) {
-          return wish.target_month >= visibleStartMonth && wish.target_month <= visibleEndMonth;
-        }
-
-        return true;
-      });
-    },
+    queryFn: () => db.WishRequest.filter({
+                date: {
+                    $gte: format(subDays(new Date(`${fetchRange.start}T00:00:00`), 370), 'yyyy-MM-dd'),
+                    $lte: format(addDays(new Date(`${fetchRange.end}T00:00:00`), 370), 'yyyy-MM-dd')
+                }
+    }),
     staleTime: 2 * 60 * 1000,
     refetchOnWindowFocus: false,
     keepPreviousData: true,
@@ -1055,21 +1038,7 @@ export default function ScheduleBoard() {
   const staffingYear = useMemo(() => currentDate ? new Date(currentDate).getFullYear() : new Date().getFullYear(), [currentDate]);
   const { data: staffingPlanEntries = [] } = useQuery({
     queryKey: ['staffingPlanEntries', staffingYear],
-    queryFn: async () => {
-      const fetchedEntries = await db.StaffingPlanEntry.list({ limit: SCHEDULE_BACKGROUND_FETCH_LIMIT });
-
-      return fetchedEntries.filter((entry) => {
-        if (entry.year !== undefined && entry.year !== null) {
-          return Number(entry.year) === staffingYear;
-        }
-
-        if (typeof entry.date === 'string') {
-          return entry.date >= `${staffingYear}-01-01` && entry.date <= `${staffingYear}-12-31`;
-        }
-
-        return false;
-      });
-    },
+    queryFn: () => db.StaffingPlanEntry.filter({ year: staffingYear }),
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
@@ -1833,7 +1802,7 @@ export default function ScheduleBoard() {
             // Find matching approved wish
             const matchingWish = wishes.find(w => 
                 w.doctor_id === shiftToDelete.doctor_id && 
-                isWishOnDate(w, shiftToDelete.date) &&
+                w.date === shiftToDelete.date &&
                 w.status === 'approved' && 
                 w.type === 'service' &&
                 (!w.position || w.position === shiftToDelete.position)
