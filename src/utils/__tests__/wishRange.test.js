@@ -16,6 +16,10 @@ describe('getWishStartDate', () => {
     expect(getWishStartDate({ date: '2024-03-10' })).toBe('2024-03-10');
   });
 
+  it('falls back to start_date when present', () => {
+    expect(getWishStartDate({ start_date: '2024-03-08' })).toBe('2024-03-08');
+  });
+
   it('returns null for empty wish', () => {
     expect(getWishStartDate({})).toBe(null);
     expect(getWishStartDate(null)).toBe(null);
@@ -29,6 +33,10 @@ describe('getWishEndDate', () => {
 
   it('falls back to date when range_end is absent', () => {
     expect(getWishEndDate({ date: '2024-03-10' })).toBe('2024-03-10');
+  });
+
+  it('falls back to end_date when present', () => {
+    expect(getWishEndDate({ end_date: '2024-03-12' })).toBe('2024-03-12');
   });
 
   it('falls back to range_start if date also absent', () => {

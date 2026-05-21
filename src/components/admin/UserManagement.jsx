@@ -118,7 +118,7 @@ export default function UserManagement() {
         },
         onSuccess: (data) => {
             console.log('[UserManagement] Update success:', data);
-            queryClient.invalidateQueries(['users']);
+            queryClient.invalidateQueries({ queryKey: ['users'] });
         },
         onError: (err) => {
             console.error('[UserManagement] Update error:', err);
@@ -129,7 +129,7 @@ export default function UserManagement() {
     const createUserMutation = useMutation({
         mutationFn: async (userData) => api.register(userData),
         onSuccess: () => {
-            queryClient.invalidateQueries(['users']);
+            queryClient.invalidateQueries({ queryKey: ['users'] });
             setShowCreateDialog(false);
             setNewUser({ email: '', full_name: '', password: '', role: 'user' });
             setSendPasswordEmail(true);
@@ -143,7 +143,7 @@ export default function UserManagement() {
     const deleteUserMutation = useMutation({
         mutationFn: async (userId) => api.deleteUser(userId),
         onSuccess: () => {
-            queryClient.invalidateQueries(['users']);
+            queryClient.invalidateQueries({ queryKey: ['users'] });
         },
         onError: (err) => {
             alert("Fehler beim Löschen: " + err.message);
@@ -163,7 +163,7 @@ export default function UserManagement() {
         try {
             await api.sendPasswordEmail(userId);
             alert('Passwort-Email wurde erfolgreich gesendet!');
-            queryClient.invalidateQueries(['users']);
+            queryClient.invalidateQueries({ queryKey: ['users'] });
         } catch (err) {
             alert('Fehler beim Senden der Passwort-Email: ' + err.message);
         } finally {
@@ -174,13 +174,17 @@ export default function UserManagement() {
     if (isLoading) return <div className="flex justify-center p-8"><Loader2 className="animate-spin" /></div>;
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6" data-testid="admin-user-management">
             <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                     <UserCog className="w-6 h-6 text-indigo-600" />
                     <h2 className="text-xl font-semibold">Benutzerverwaltung</h2>
                 </div>
-                <Button onClick={() => setShowCreateDialog(true)} className="bg-indigo-600 hover:bg-indigo-700">
+                <Button
+                    onClick={() => setShowCreateDialog(true)}
+                    className="bg-indigo-600 hover:bg-indigo-700"
+                    data-testid="admin-user-create-button"
+                >
                     <UserPlus className="w-4 h-4 mr-2" />
                     Neuer Benutzer
                 </Button>
@@ -193,7 +197,7 @@ export default function UserManagement() {
                         value={tenantFilter || "__all__"}
                         onValueChange={(val) => setTenantFilter(val === "__all__" ? "" : val)}
                     >
-                        <SelectTrigger id="tenantFilter" className="w-64">
+                        <SelectTrigger id="tenantFilter" className="w-64" data-testid="admin-user-tenant-filter">
                             <SelectValue placeholder="Alle Mandanten" />
                         </SelectTrigger>
                         <SelectContent>
@@ -234,7 +238,7 @@ export default function UserManagement() {
                             const hasAllAccess = !userTenants || userTenants.length === 0;
                             
                             return (
-                            <TableRow key={user.id}>
+                            <TableRow key={user.id} data-testid={`admin-user-row-${user.id}`}>
                                 <TableCell className="font-medium">{user.full_name}</TableCell>
                                 <TableCell>{user.email}</TableCell>
                                 <TableCell>
@@ -260,6 +264,7 @@ export default function UserManagement() {
                                         placeholder="Keine Person"
                                         searchPlaceholder="Person suchen..."
                                         triggerClassName="w-48"
+                                        triggerTestId={`admin-user-doctor-${user.id}`}
                                     />
                                 </TableCell>
                                 <TableCell>
@@ -267,6 +272,7 @@ export default function UserManagement() {
                                         variant="outline"
                                         size="sm"
                                         className="gap-1"
+                                        data-testid={`admin-user-tenants-${user.id}`}
                                         onClick={() => {
                                             setSelectedUser(user);
                                             setShowTenantDialog(true);
@@ -282,12 +288,12 @@ export default function UserManagement() {
                                 </TableCell>
                                 <TableCell>
                                     {user.email_verified ? (
-                                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 gap-1">
+                                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 gap-1" data-testid={`admin-user-email-status-${user.id}`}>
                                             <MailCheck className="w-3 h-3" />
                                             Verifiziert
                                         </Badge>
                                     ) : (
-                                        <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 gap-1">
+                                        <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 gap-1" data-testid={`admin-user-email-status-${user.id}`}>
                                             <MailX className="w-3 h-3" />
                                             Offen
                                         </Badge>
@@ -295,11 +301,11 @@ export default function UserManagement() {
                                 </TableCell>
                                 <TableCell>
                                     {user.is_active ? (
-                                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200" data-testid={`admin-user-active-status-${user.id}`}>
                                             Aktiv
                                         </Badge>
                                     ) : (
-                                        <Badge variant="outline" className="bg-slate-100 text-slate-600 border-slate-300">
+                                        <Badge variant="outline" className="bg-slate-100 text-slate-600 border-slate-300" data-testid={`admin-user-active-status-${user.id}`}>
                                             Inaktiv
                                         </Badge>
                                     )}
@@ -311,6 +317,7 @@ export default function UserManagement() {
                                             size="sm"
                                             className="gap-1 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50"
                                             disabled={passwordEmailSending[user.id] || !user.is_active}
+                                            data-testid={`admin-user-send-password-${user.id}`}
                                             onClick={() => {
                                                 if (confirm(`Neues Passwort generieren und an "${user.email}" senden?`)) {
                                                     handleSendPasswordEmail(user.id);
@@ -329,7 +336,7 @@ export default function UserManagement() {
                                             defaultValue={user.role} 
                                             onValueChange={(val) => updateUserMutation.mutate({ id: user.id, data: { role: val } })}
                                         >
-                                            <SelectTrigger className="w-32">
+                                            <SelectTrigger className="w-32" data-testid={`admin-user-role-${user.id}`}>
                                                 <SelectValue />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -342,6 +349,7 @@ export default function UserManagement() {
                                             size="icon"
                                             className="text-red-500 hover:text-red-700 hover:bg-red-50"
                                             disabled={!user.is_active}
+                                            data-testid={`admin-user-delete-${user.id}`}
                                             onClick={() => {
                                                 if (confirm(`Benutzer "${user.full_name || user.email}" wirklich löschen?`)) {
                                                     deleteUserMutation.mutate(user.id);
@@ -360,7 +368,7 @@ export default function UserManagement() {
 
             {/* Create User Dialog */}
             <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-                <DialogContent>
+                <DialogContent data-testid="admin-user-create-dialog">
                     <DialogHeader>
                         <DialogTitle>Neuen Benutzer anlegen</DialogTitle>
                     </DialogHeader>
@@ -375,6 +383,7 @@ export default function UserManagement() {
                             <Input
                                 id="email"
                                 type="email"
+                                data-testid="admin-user-create-email"
                                 value={newUser.email}
                                 onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
                                 placeholder="name@beispiel.de"
@@ -384,6 +393,7 @@ export default function UserManagement() {
                             <Label htmlFor="full_name">Name</Label>
                             <Input
                                 id="full_name"
+                                data-testid="admin-user-create-name"
                                 value={newUser.full_name}
                                 onChange={(e) => setNewUser({ ...newUser, full_name: e.target.value })}
                                 placeholder="Max Mustermann"
@@ -394,6 +404,7 @@ export default function UserManagement() {
                             <Input
                                 id="password"
                                 type="password"
+                                data-testid="admin-user-create-password"
                                 value={newUser.password}
                                 onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
                                 placeholder="Mindestens 6 Zeichen"
@@ -402,7 +413,7 @@ export default function UserManagement() {
                         <div className="space-y-2">
                             <Label htmlFor="role">Rolle</Label>
                             <Select value={newUser.role} onValueChange={(val) => setNewUser({ ...newUser, role: val })}>
-                                <SelectTrigger>
+                                <SelectTrigger data-testid="admin-user-create-role">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -414,6 +425,7 @@ export default function UserManagement() {
                         <div className="flex items-center space-x-2 p-3 bg-indigo-50 rounded-lg border border-indigo-200">
                             <Checkbox 
                                 id="sendPasswordEmail"
+                                data-testid="admin-user-create-send-password-email"
                                 checked={sendPasswordEmail}
                                 onCheckedChange={(checked) => setSendPasswordEmail(!!checked)}
                             />
@@ -439,6 +451,7 @@ export default function UserManagement() {
                             onClick={handleCreateUser} 
                             disabled={createUserMutation.isPending}
                             className="bg-indigo-600 hover:bg-indigo-700"
+                            data-testid="admin-user-create-submit"
                         >
                             {createUserMutation.isPending ? (
                                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -523,11 +536,12 @@ function TenantSelector({ user, tenants, adminHasFullAccess, onSave, onClose, is
             {/* All Access Toggle - only show if admin has full access */}
             {adminHasFullAccess && (
                 <div className="flex items-center space-x-2 p-3 bg-slate-50 rounded-lg border">
-                    <Checkbox 
-                        id="all-access"
-                        checked={allAccess}
-                        onCheckedChange={(checked) => {
-                            setAllAccess(checked);
+                            <Checkbox 
+                                id="all-access"
+                                data-testid="admin-user-tenant-all-access"
+                                checked={allAccess}
+                                onCheckedChange={(checked) => {
+                                    setAllAccess(checked);
                             if (checked) setSelectedTenants([]);
                         }}
                     />
@@ -552,6 +566,7 @@ function TenantSelector({ user, tenants, adminHasFullAccess, onSave, onClose, is
                             return (
                             <div 
                                 key={tenant.id} 
+                                data-testid={`admin-user-tenant-option-${tenant.id}`}
                                 className={`flex items-center space-x-2 p-2 rounded border cursor-pointer hover:bg-slate-50 ${
                                     isSelected ? 'border-indigo-300 bg-indigo-50' : 'border-slate-200'
                                 }`}
@@ -561,6 +576,7 @@ function TenantSelector({ user, tenants, adminHasFullAccess, onSave, onClose, is
                                 }}
                             >
                                 <Checkbox 
+                                    data-testid={`admin-user-tenant-checkbox-${tenant.id}`}
                                     checked={isSelected}
                                     onCheckedChange={() => {
                                         console.log('[TenantSelector] Checkbox changed for tenant:', tenant.id);
@@ -592,6 +608,7 @@ function TenantSelector({ user, tenants, adminHasFullAccess, onSave, onClose, is
                     onClick={handleSave}
                     disabled={isLoading}
                     className="bg-indigo-600 hover:bg-indigo-700"
+                    data-testid="admin-user-tenant-save"
                 >
                     {isLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
                     Speichern

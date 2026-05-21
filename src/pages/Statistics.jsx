@@ -14,6 +14,8 @@ import ChartCard from "@/components/statistics/ChartCard";
 import WishFulfillmentReport from "@/components/statistics/WishFulfillmentReport";
 import ComplianceReport from "@/components/statistics/ComplianceReport";
 import WorkingTimeReport from "@/components/statistics/WorkingTimeReport";
+import { useToast } from '@/components/ui/use-toast';
+import { exportStatisticsCsv, exportStatisticsExcel, exportStatisticsPdf } from '@/components/statistics/exportUtils';
 
 const COLORS = {
     // Default colors - used as fallback. Actual colors come from workplace data.
@@ -40,6 +42,7 @@ const MONTHS = [
 
 export default function StatisticsPage() {
     const { user } = useAuth();
+    const { toast } = useToast();
     const isAdmin = user?.role === 'admin';
     const [year, setYear] = useState(new Date().getFullYear().toString());
     const [month, setMonth] = useState("all");
@@ -75,11 +78,18 @@ export default function StatisticsPage() {
     });
 
     const { data: wishes = [], isLoading: isLoadingWishes } = useQuery({
-        queryKey: ['wishes', year],
+        queryKey: ['wishes', year, month],
         enabled: isAdmin,
-        queryFn: () => db.WishRequest.filter({
-             date: { "$gte": `${year}-01-01`, "$lte": `${year}-12-31` }
-        }),
+        queryFn: () => {
+            if (month === 'all') {
+                return db.WishRequest.filter({
+                    target_month: { "$gte": `${year}-01`, "$lte": `${year}-12` }
+                });
+            }
+
+            const targetMonth = `${year}-${String(parseInt(month, 10) + 1).padStart(2, '0')}`;
+            return db.WishRequest.filter({ target_month: targetMonth });
+        },
     });
 
     const isLoading = isLoadingDocs || isLoadingShifts || isLoadingWorkplaces || isLoadingWishes;
@@ -180,29 +190,19 @@ export default function StatisticsPage() {
         );
     }
 
-    const handleExport = () => {
-        const headers = ["Name", "Rolle", "Gesamt Dienste", "Gesamt Arbeitsplätze", ...stats.serviceItems, ...stats.rotationItems];
-        const csvContent = [
-            headers.join(","),
-            ...stats.byDoctor.map(doc => [
-                `"${doc.name}"`,
-                doc.role,
-                doc.totalDienste,
-                doc.totalRotationen,
-                ...stats.serviceItems.map(k => doc.breakdown[k]),
-                ...stats.rotationItems.map(k => doc.breakdown[k])
-            ].join(","))
-        ].join("\n");
+    const selectedPeriodLabel = month === "all" ? "Ganzes Jahr" : MONTHS[parseInt(month)];
+    const exportTitle = `Statistik ${year} - ${selectedPeriodLabel}`;
 
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.setAttribute("href", url);
-        const suffix = month === "all" ? "gesamt" : MONTHS[parseInt(month)];
-        link.setAttribute("download", `statistik_${year}_${suffix}.csv`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+    const handleExport = (exporter) => {
+        try {
+            exporter({ stats, year, month, title: exportTitle });
+        } catch (error) {
+            toast({
+                variant: 'destructive',
+                title: 'Export fehlgeschlagen',
+                description: error instanceof Error ? error.message : 'Der Export konnte nicht erstellt werden.',
+            });
+        }
     };
 
     if (isLoading) {
@@ -210,7 +210,7 @@ export default function StatisticsPage() {
     }
 
     return (
-        <div className="container mx-auto max-w-7xl space-y-8">
+        <div className="container mx-auto max-w-7xl space-y-8" data-testid="statistics-page">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight text-slate-900">Statistik</h1>
@@ -218,7 +218,7 @@ export default function StatisticsPage() {
                 </div>
                 <div className="flex items-center gap-2">
                     <Select value={year} onValueChange={setYear}>
-                        <SelectTrigger className="w-[100px]">
+                        <SelectTrigger className="w-[100px]" data-testid="statistics-year-trigger">
                             <SelectValue placeholder="Jahr" />
                         </SelectTrigger>
                         <SelectContent>
@@ -228,7 +228,7 @@ export default function StatisticsPage() {
                         </SelectContent>
                     </Select>
                     <Select value={month} onValueChange={setMonth}>
-                        <SelectTrigger className="w-[140px]">
+                        <SelectTrigger className="w-[140px]" data-testid="statistics-month-trigger">
                             <SelectValue placeholder="Monat" />
                         </SelectTrigger>
                         <SelectContent>
@@ -238,8 +238,17 @@ export default function StatisticsPage() {
                             ))}
                         </SelectContent>
                     </Select>
-                    <Button variant="outline" onClick={handleExport} size="icon" title="CSV Export">
-                        <Download className="h-4 w-4" />
+                    <Button variant="outline" onClick={() => handleExport(exportStatisticsCsv)} data-testid="statistics-export-csv" title="CSV Export">
+                        <Download className="h-4 w-4 mr-2" />
+                        CSV
+                    </Button>
+                    <Button variant="outline" onClick={() => handleExport(exportStatisticsExcel)} data-testid="statistics-export-excel" title="Excel Export">
+                        <Download className="h-4 w-4 mr-2" />
+                        Excel
+                    </Button>
+                    <Button variant="outline" onClick={() => handleExport(exportStatisticsPdf)} data-testid="statistics-export-pdf" title="PDF Export">
+                        <Download className="h-4 w-4 mr-2" />
+                        PDF
                     </Button>
                 </div>
             </div>
@@ -267,13 +276,13 @@ export default function StatisticsPage() {
                 </Card>
             </div>
 
-            <Tabs defaultValue="overview" className="space-y-4">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
                 <TabsList>
-                    <TabsTrigger value="overview" className="flex items-center gap-2"><BarChart3 className="w-4 h-4" /> Übersicht & Charts</TabsTrigger>
-                    <TabsTrigger value="workingtime" className="flex items-center gap-2"><Clock className="w-4 h-4" /> Arbeitszeit</TabsTrigger>
-                    <TabsTrigger value="compliance" className="flex items-center gap-2">Regel-Compliance</TabsTrigger>
-                    <TabsTrigger value="wishes" className="flex items-center gap-2">Wunscherfüllung</TabsTrigger>
-                    <TabsTrigger value="details" className="flex items-center gap-2"><TableIcon className="w-4 h-4" /> Detaillierte Tabelle</TabsTrigger>
+                    <TabsTrigger value="overview" className="flex items-center gap-2" data-testid="statistics-tab-overview"><BarChart3 className="w-4 h-4" /> Übersicht & Charts</TabsTrigger>
+                    <TabsTrigger value="workingtime" className="flex items-center gap-2" data-testid="statistics-tab-workingtime"><Clock className="w-4 h-4" /> Arbeitszeit</TabsTrigger>
+                    <TabsTrigger value="compliance" className="flex items-center gap-2" data-testid="statistics-tab-compliance">Regel-Compliance</TabsTrigger>
+                    <TabsTrigger value="wishes" className="flex items-center gap-2" data-testid="statistics-tab-wishes">Wunscherfüllung</TabsTrigger>
+                    <TabsTrigger value="details" className="flex items-center gap-2" data-testid="statistics-tab-details"><TableIcon className="w-4 h-4" /> Detaillierte Tabelle</TabsTrigger>
                 </TabsList>
                 
                 <TabsContent value="workingtime">
@@ -282,6 +291,7 @@ export default function StatisticsPage() {
                 
                 <TabsContent value="overview" className="space-y-4">
                     {month === "all" && (
+                        <div data-testid="statistics-monthly-chart">
                         <ChartCard 
                             title="Jahresverlauf" 
                             description="Entwicklung der Dienste und Zuweisungen über die Monate"
@@ -302,9 +312,11 @@ export default function StatisticsPage() {
                                 </BarChart>
                             </ResponsiveContainer>
                         </ChartCard>
+                        </div>
                     )}
 
                     <div className="grid gap-4 md:grid-cols-1 lg:grid-cols-2">
+                        <div data-testid="statistics-services-chart">
                         <ChartCard 
                             title="Dienste pro Person"
                             description={month === "all" ? `Anzahl der Dienste im Jahr ${year}` : `Anzahl der Dienste im ${MONTHS[parseInt(month)]} ${year}`}
@@ -329,7 +341,9 @@ export default function StatisticsPage() {
                                 </BarChart>
                             </ResponsiveContainer>
                         </ChartCard>
+                        </div>
                         
+                        <div data-testid="statistics-rotations-chart">
                         <ChartCard 
                             title="Arbeitsplätze pro Person"
                             description={`Verteilung der Rotationen im Jahr ${year}`}
@@ -352,6 +366,7 @@ export default function StatisticsPage() {
                                 </BarChart>
                             </ResponsiveContainer>
                         </ChartCard>
+                        </div>
                     </div>
                 </TabsContent>
 
@@ -364,7 +379,7 @@ export default function StatisticsPage() {
                 </TabsContent>
 
                 <TabsContent value="details">
-                    <Card>
+                    <Card data-testid="statistics-details-table">
                         <CardHeader>
                             <CardTitle>Detailauswertung</CardTitle>
                             <CardDescription>Alle Zahlen im Überblick</CardDescription>

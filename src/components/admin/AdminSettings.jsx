@@ -35,7 +35,7 @@ export default function AdminSettings() {
                 return db.SystemSetting.create({ key, value });
             }
         },
-        onSuccess: () => queryClient.invalidateQueries(['systemSettings'])
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['systemSettings'] })
     });
 
     const wishDeadlineMonths = settings.find(s => s.key === 'wish_deadline_months')?.value || '';
@@ -63,7 +63,7 @@ export default function AdminSettings() {
         .sort((a, b) => (a.order || 0) - (b.order || 0));
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6" data-testid="admin-settings-panel">
             <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
                 <div className="flex items-center gap-3 mb-6">
                     <div className="p-2 bg-slate-100 rounded-lg">
@@ -86,6 +86,7 @@ export default function AdminSettings() {
                                 type="number" 
                                 min="0"
                                 max="24"
+                                data-testid="admin-settings-wish-deadline-months"
                                 placeholder="Keine Frist"
                                 value={wishDeadlineMonths}
                                 onChange={(e) => updateSettingMutation.mutate({ key: 'wish_deadline_months', value: e.target.value })}
@@ -98,6 +99,7 @@ export default function AdminSettings() {
                             <div className="flex items-start gap-3 pt-3 mt-3 border-t border-slate-200">
                                 <Checkbox
                                     id="wish-reminder-email"
+                                    data-testid="admin-settings-wish-reminder-email"
                                     checked={wishReminderEnabled}
                                     onCheckedChange={(checked) => updateSettingMutation.mutate({ 
                                         key: 'wish_reminder_email_enabled', 
@@ -145,6 +147,7 @@ export default function AdminSettings() {
                                 <p className="text-xs text-slate-500">Wunsch für einen bestimmten Dienst</p>
                             </div>
                             <Switch 
+                                data-testid="admin-settings-service-requires-approval"
                                 checked={approvalRules.service_requires_approval}
                                 onCheckedChange={(checked) => updateApprovalRules({
                                     ...approvalRules,
@@ -159,6 +162,7 @@ export default function AdminSettings() {
                                 <p className="text-xs text-slate-500">Wunsch, an einem Tag keinen Dienst zu haben</p>
                             </div>
                             <Switch 
+                                data-testid="admin-settings-no-service-requires-approval"
                                 checked={approvalRules.no_service_requires_approval}
                                 onCheckedChange={(checked) => updateApprovalRules({
                                     ...approvalRules,
@@ -173,6 +177,7 @@ export default function AdminSettings() {
                                 <p className="text-xs text-slate-500">Genehmigte Dienstwünsche automatisch als Schicht anlegen</p>
                             </div>
                             <Switch 
+                                data-testid="admin-settings-auto-create-shift-on-approval"
                                 checked={approvalRules.auto_create_shift_on_approval}
                                 onCheckedChange={(checked) => updateApprovalRules({
                                     ...approvalRules,

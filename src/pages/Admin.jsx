@@ -34,10 +34,10 @@ export default function AdminPage() {
 
             <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
                 <TabsList className="grid w-full grid-cols-4 lg:w-[800px]">
-                    <TabsTrigger value="users">Benutzer & Rollen</TabsTrigger>
-                    <TabsTrigger value="settings">Einstellungen</TabsTrigger>
-                    <TabsTrigger value="database">Datenbank</TabsTrigger>
-                    <TabsTrigger value="logs">Logs</TabsTrigger>
+                    <TabsTrigger value="users" data-testid="admin-tab-users">Benutzer & Rollen</TabsTrigger>
+                    <TabsTrigger value="settings" data-testid="admin-tab-settings">Einstellungen</TabsTrigger>
+                    <TabsTrigger value="database" data-testid="admin-tab-database">Datenbank</TabsTrigger>
+                    <TabsTrigger value="logs" data-testid="admin-tab-logs">Logs</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="users">

@@ -3,64 +3,10 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Toolti
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import ChartCard from "@/components/statistics/ChartCard";
+import { buildWishFulfillmentStats } from '@/components/statistics/wishFulfillmentUtils';
 
 export default function WishFulfillmentReport({ doctors, wishes, shifts }) {
-    const stats = useMemo(() => {
-        const data = doctors.map(doc => {
-            const docWishes = wishes.filter(w => w.doctor_id === doc.id);
-            if (docWishes.length === 0) return null;
-
-            let fulfilled = 0;
-            let total = docWishes.length;
-            let approved = 0;
-            let rejected = 0;
-
-            docWishes.forEach(wish => {
-                if (wish.status === 'approved') approved++;
-                if (wish.status === 'rejected') rejected++;
-
-                const shiftOnDate = shifts.find(s => s.date === wish.date && s.doctor_id === doc.id);
-                
-                // Logic: Did reality match wish?
-                let isFulfilled = false;
-
-                if (wish.type === 'service') {
-                    // Wanted service. Did they get a service shift?
-                    // Assuming positions in "Dienste" category or specific known service names.
-                    // Since we don't have the category map easily here, we rely on naming conventions or passed props.
-                    // For now, let's assume "Dienst" in name or specific list.
-                    const isServiceShift = shiftOnDate && (
-                        shiftOnDate.position.includes("Dienst") || 
-                        shiftOnDate.position === "Spätdienst"
-                    );
-                    if (isServiceShift) isFulfilled = true;
-                } else {
-                    // Wanted NO service. 
-                    // Fulfilled if they have NO shift, OR a non-service shift (like Rotation, Free, Vacation)
-                    // Basically, failed if they HAVE a service shift.
-                    const isServiceShift = shiftOnDate && (
-                        shiftOnDate.position.includes("Dienst") || 
-                        shiftOnDate.position === "Spätdienst"
-                    );
-                    if (!isServiceShift) isFulfilled = true;
-                }
-
-                if (isFulfilled) fulfilled++;
-            });
-
-            return {
-                name: doc.name,
-                role: doc.role,
-                total,
-                fulfilled,
-                rate: total > 0 ? Math.round((fulfilled / total) * 100) : 0,
-                approved,
-                rejected
-            };
-        }).filter(Boolean).sort((a, b) => b.rate - a.rate);
-
-        return data;
-    }, [doctors, wishes, shifts]);
+    const stats = useMemo(() => buildWishFulfillmentStats({ doctors, wishes, shifts }), [doctors, wishes, shifts]);
 
     if (!stats || stats.length === 0) {
         return (
