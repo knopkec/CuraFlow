@@ -353,24 +353,38 @@ export async function runMasterMigrations(dbPool) {
   }, { duplicateCodes: ['ER_TABLE_EXISTS_ERROR'], duplicateReason: 'Tabelle bereits vorhanden' });
 
   // Idempotent fix-up: if any of these tables were created in a previous
-  // deploy with the wrong collation (utf8mb4_unicode_ci), convert them to
-  // db_tokens' collation so the FKs below can be (re)created.
+  // deploy with the wrong collation (so the FK to db_tokens(id) can't be
+  // formed), drop them in dependency order if they are still empty. The
+  // create migrations below will then rebuild them with the correct
+  // collation. Tables that already hold data are left untouched and any
+  // mismatch will surface in the subsequent create step.
   await run('fix_tenant_group_tables_collation', async () => {
-    const tables = ['tenant_group', 'tenant_group_member', 'shared_workplace', 'shared_shift_entry', 'shared_workplace_quota'];
+    // Child-first order
+    const tables = [
+      'shared_workplace_quota',
+      'shared_shift_entry',
+      'shared_workplace',
+      'tenant_group_member',
+    ];
     let changed = false;
     for (const t of tables) {
-      const [rows] = await dbPool.execute(
+      const [tRows] = await dbPool.execute(
         `SELECT TABLE_COLLATION AS co FROM information_schema.TABLES
           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
         [t]
       );
-      const current = rows[0]?.co;
-      if (current && current !== dbTokensCollation) {
-        await dbPool.query(
-          `ALTER TABLE \`${t}\` CONVERT TO CHARACTER SET ${dbTokensCharset} COLLATE ${dbTokensCollation}`
-        );
-        changed = true;
+      const current = tRows[0]?.co;
+      if (!current || current === dbTokensCollation) continue;
+
+      const [cntRows] = await dbPool.execute(`SELECT COUNT(*) AS cnt FROM \`${t}\``);
+      const rowCount = Number(cntRows[0]?.cnt || 0);
+      if (rowCount > 0) {
+        // Leave non-empty tables alone — operator must migrate data manually.
+        continue;
       }
+
+      await dbPool.query(`DROP TABLE \`${t}\``);
+      changed = true;
     }
     return changed || SKIPPED;
   }, { skippedReason: 'Collation bereits korrekt' });
