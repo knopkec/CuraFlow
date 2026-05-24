@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import { db } from '../index.js';
 import { broadcastUserEvent, buildRealtimeScope, registerRealtimeClient } from '../utils/realtime.js';
 import { getEmailProviderInfo, sendEmail } from '../utils/email.js';
+import { loadUserGroupContext, listUserGroups } from '../utils/tenantGroups.js';
 
 const router = express.Router();
 
@@ -660,6 +661,30 @@ router.get('/my-tenants', authMiddleware, async (req, res, next) => {
     res.json({
       hasFullAccess: !allowedTenantList || allowedTenantList.length === 0,
       tenants: tokens
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============ GET MY ALLOWED GROUPS ============
+// Returns the cross-tenant pool groups the user is allowed to see.
+router.get('/my-groups', authMiddleware, async (req, res, next) => {
+  try {
+    const ctx = await loadUserGroupContext(db, req.user.sub);
+    if (!ctx) {
+      return res.status(404).json({ error: 'Benutzer nicht gefunden' });
+    }
+    const groups = await listUserGroups(db, ctx);
+    res.json({
+      hasFullAccess: ctx.isMasterAdmin,
+      groups: groups.map((g) => ({
+        ...g,
+        is_active: Boolean(g.is_active),
+        // canWrite signals whether the user may modify pool data for this group
+        canWrite: ctx.isMasterAdmin
+          || (Array.isArray(ctx.adminGroups) && ctx.adminGroups.includes(Number(g.id))),
+      })),
     });
   } catch (error) {
     next(error);

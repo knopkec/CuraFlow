@@ -14,6 +14,10 @@ const AuthContext = createContext({
     needsTenantSelection: false,
     allowedTenants: [],
     hasFullTenantAccess: false,
+    allowedGroups: [],
+    hasGroupAccess: false,
+    activeGroupId: null,
+    setActiveGroupId: () => {},
     completeTenantSelection: () => {},
     refreshUser: async () => {},
     updateMe: async () => {},
@@ -36,6 +40,30 @@ const JWTAuthProviderInner = ({ children }) => {
     const [needsTenantSelection, setNeedsTenantSelection] = useState(false);
     const [allowedTenants, setAllowedTenants] = useState([]);
     const [hasFullTenantAccess, setHasFullTenantAccess] = useState(false);
+    const [allowedGroups, setAllowedGroups] = useState([]);
+    const [hasGroupAccess, setHasGroupAccess] = useState(false);
+    const [activeGroupId, setActiveGroupIdState] = useState(() => {
+        try {
+            const raw = localStorage.getItem('curaflow_active_group_id');
+            const parsed = raw ? Number(raw) : null;
+            return Number.isInteger(parsed) ? parsed : null;
+        } catch {
+            return null;
+        }
+    });
+
+    const setActiveGroupId = (id) => {
+        setActiveGroupIdState(id);
+        try {
+            if (id === null || id === undefined) {
+                localStorage.removeItem('curaflow_active_group_id');
+            } else {
+                localStorage.setItem('curaflow_active_group_id', String(id));
+            }
+        } catch (e) {
+            console.error('[Auth] Failed to persist active group id:', e);
+        }
+    };
 
     const getStoredToken = () => {
         try {
@@ -74,6 +102,16 @@ const JWTAuthProviderInner = ({ children }) => {
                 setIsAuthenticated(true);
                 // Check if password change is required
                 setMustChangePassword(userData.must_change_password === true);
+
+                // Load tenant groups (non-blocking on failure)
+                try {
+                    const groupsData = await api.getMyGroups();
+                    const list = Array.isArray(groupsData?.groups) ? groupsData.groups : [];
+                    setAllowedGroups(list);
+                    setHasGroupAccess(list.length > 0);
+                } catch (err) {
+                    console.warn('[Auth] Failed to load tenant groups on refresh:', err.message);
+                }
             } catch (error) {
                 console.error('Auth check failed:', error);
                 storeToken(null);
@@ -155,7 +193,19 @@ const JWTAuthProviderInner = ({ children }) => {
             console.error('[Auth] Failed to load tenants:', err);
             // Bei Fehler einfach weitermachen ohne Tenant-Auswahl
         }
-        
+
+        // Load cross-tenant pool groups (optional, non-blocking)
+        try {
+            const groupsData = await api.getMyGroups();
+            const list = Array.isArray(groupsData?.groups) ? groupsData.groups : [];
+            setAllowedGroups(list);
+            setHasGroupAccess(list.length > 0);
+        } catch (err) {
+            console.warn('[Auth] Failed to load tenant groups:', err.message);
+            setAllowedGroups([]);
+            setHasGroupAccess(false);
+        }
+
         return data;
     };
 
@@ -223,6 +273,10 @@ const JWTAuthProviderInner = ({ children }) => {
             needsTenantSelection,
             allowedTenants,
             hasFullTenantAccess,
+            allowedGroups,
+            hasGroupAccess,
+            activeGroupId,
+            setActiveGroupId,
             completeTenantSelection,
             login,
             logout,

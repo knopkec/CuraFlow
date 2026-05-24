@@ -150,4 +150,29 @@ describe('runMasterMigrations', () => {
       }),
     ]);
   });
+
+  it('creates the tenant_group tables and adds group columns to app_users', async () => {
+    const dbPool = createMockDbPool();
+
+    await runMasterMigrations(dbPool);
+
+    const createdTables = dbPool.calls.filter(({ sql }) =>
+      sql.includes('CREATE TABLE IF NOT EXISTS tenant_group ')
+      || sql.includes('CREATE TABLE IF NOT EXISTS tenant_group_member ')
+      || sql.includes('CREATE TABLE IF NOT EXISTS shared_workplace ')
+      || sql.includes('CREATE TABLE IF NOT EXISTS shared_shift_entry ')
+      || sql.includes('CREATE TABLE IF NOT EXISTS shared_workplace_quota ')
+    );
+    expect(createdTables).toHaveLength(5);
+
+    const allowedGroupsAlter = dbPool.calls.find(({ sql }) =>
+      sql.includes('ALTER TABLE `app_users` ADD COLUMN `allowed_groups`')
+    );
+    expect(allowedGroupsAlter).toBeDefined();
+
+    const adminGroupsAlter = dbPool.calls.find(({ sql }) =>
+      sql.includes('ALTER TABLE `app_users` ADD COLUMN `group_admin_groups`')
+    );
+    expect(adminGroupsAlter).toBeDefined();
+  });
 });

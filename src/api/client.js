@@ -301,6 +301,145 @@ class APIClient {
     });
   }
 
+  // ==================== Tenant Groups (Cross-Tenant Pool) ====================
+
+  // List groups visible to the current user
+  async getMyGroups() {
+    return this.request('/api/auth/my-groups');
+  }
+
+  // Pool shifts that should appear in the active tenant's department schedule.
+  // Resolves the active tenant from the x-db-token header (set automatically).
+  async getVisiblePoolShifts({ from, to } = {}) {
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    const qs = params.toString();
+    return this.request(`/api/groups/visible-shifts${qs ? `?${qs}` : ''}`);
+  }
+
+  async listGroups() {
+    return this.request('/api/groups');
+  }
+
+  async getGroup(groupId) {
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}`);
+  }
+
+  async createGroup(data) {
+    return this.request('/api/groups', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateGroup(groupId, data) {
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteGroup(groupId) {
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async listGroupMembers(groupId) {
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}/members`);
+  }
+
+  async addGroupMember(groupId, tenantId) {
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ tenant_id: tenantId }),
+    });
+  }
+
+  async removeGroupMember(groupId, tenantId) {
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(tenantId)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async listSharedWorkplaces(groupId) {
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}/workplaces`);
+  }
+
+  async createSharedWorkplace(groupId, data) {
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}/workplaces`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateSharedWorkplace(groupId, workplaceId, data) {
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}/workplaces/${encodeURIComponent(workplaceId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteSharedWorkplace(groupId, workplaceId) {
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}/workplaces/${encodeURIComponent(workplaceId)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getWorkplaceQuotas(groupId, workplaceId) {
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}/workplaces/${encodeURIComponent(workplaceId)}/quotas`);
+  }
+
+  async replaceWorkplaceQuotas(groupId, workplaceId, quotas) {
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}/workplaces/${encodeURIComponent(workplaceId)}/quotas`, {
+      method: 'PUT',
+      body: JSON.stringify({ quotas }),
+    });
+  }
+
+  async getGroupStaff(groupId) {
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}/staff`);
+  }
+
+  async getGroupSchedule(groupId, { from, to } = {}) {
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    const qs = params.toString();
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}/schedule${qs ? `?${qs}` : ''}`);
+  }
+
+  async createGroupShift(groupId, data, { force = false } = {}) {
+    const qs = force ? '?force=1' : '';
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}/shifts${qs}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateGroupShift(groupId, shiftId, data, { force = false } = {}) {
+    const qs = force ? '?force=1' : '';
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}/shifts/${encodeURIComponent(shiftId)}${qs}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteGroupShift(groupId, shiftId) {
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}/shifts/${encodeURIComponent(shiftId)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getGroupStats(groupId, { from, to } = {}) {
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    const qs = params.toString();
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}/stats${qs ? `?${qs}` : ''}`);
+  }
+
   // ==================== Admin User Management ====================
 
   async listUsers() {

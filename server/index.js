@@ -27,6 +27,7 @@ import atomicRouter from './routes/atomic.js';
 import aiAutofillRouter from './routes/aiAutofill.js';
 import masterRouter from './routes/master.js';
 import certificatesRouter from './routes/certificates.js';
+import groupsRouter from './routes/groups.js';
 import { checkAndSendWishReminders } from './utils/wishReminder.js';
 
 // Load environment variables
@@ -523,6 +524,7 @@ app.use('/api/atomic', atomicRouter);
 app.use('/api/schedule', aiAutofillRouter);
 app.use('/api/master', masterRouter);
 app.use('/api/certificates', certificatesRouter);
+app.use('/api/groups', groupsRouter);
 
 // ===== SPA fallback (Coolify / single-container deployment) =====
 if (fs.existsSync(distPath)) {

@@ -316,5 +316,113 @@ export async function runMasterMigrations(dbPool) {
     `);
   }, { duplicateCodes: ['ER_TABLE_EXISTS_ERROR'], duplicateReason: 'Tabelle bereits vorhanden' });
 
+  // ===== Tenant Groups (Cross-Department Pools) =====
+  // See docs/features/TENANT_GROUPS.md
+  // A tenant_group bundles several db_tokens (departments) so that
+  // cross-department admins can manage shared pool shifts (AD, KWE, OD, ...).
+
+  await run('create_tenant_group_table', async () => {
+    await dbPool.execute(`
+      CREATE TABLE IF NOT EXISTS tenant_group (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        name VARCHAR(255) NOT NULL,
+        description TEXT DEFAULT NULL,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
+        updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+        UNIQUE KEY uk_tenant_group_name (name)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+    `);
+  }, { duplicateCodes: ['ER_TABLE_EXISTS_ERROR'], duplicateReason: 'Tabelle bereits vorhanden' });
+
+  await run('create_tenant_group_member_table', async () => {
+    await dbPool.execute(`
+      CREATE TABLE IF NOT EXISTS tenant_group_member (
+        group_id INT NOT NULL,
+        tenant_id VARCHAR(36) NOT NULL,
+        role ENUM('member','observer') NOT NULL DEFAULT 'member',
+        created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
+        PRIMARY KEY (group_id, tenant_id),
+        INDEX idx_tgm_tenant (tenant_id),
+        CONSTRAINT fk_tgm_group FOREIGN KEY (group_id) REFERENCES tenant_group(id) ON DELETE CASCADE,
+        CONSTRAINT fk_tgm_tenant FOREIGN KEY (tenant_id) REFERENCES db_tokens(id) ON DELETE CASCADE
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+    `);
+  }, { duplicateCodes: ['ER_TABLE_EXISTS_ERROR'], duplicateReason: 'Tabelle bereits vorhanden' });
+
+  await run('create_shared_workplace_table', async () => {
+    await dbPool.execute(`
+      CREATE TABLE IF NOT EXISTS shared_workplace (
+        id VARCHAR(36) PRIMARY KEY,
+        group_id INT NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        category VARCHAR(100) DEFAULT NULL,
+        start_time TIME DEFAULT NULL,
+        end_time TIME DEFAULT NULL,
+        min_staff INT NOT NULL DEFAULT 1,
+        optimal_staff INT NOT NULL DEFAULT 1,
+        affects_availability TINYINT(1) NOT NULL DEFAULT 1,
+        consecutive_days_mode VARCHAR(20) DEFAULT 'allowed',
+        constraints_json JSON DEFAULT NULL,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
+        updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+        created_by VARCHAR(255) DEFAULT NULL,
+        INDEX idx_shared_workplace_group (group_id, is_active),
+        CONSTRAINT fk_swp_group FOREIGN KEY (group_id) REFERENCES tenant_group(id) ON DELETE CASCADE
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+    `);
+  }, { duplicateCodes: ['ER_TABLE_EXISTS_ERROR'], duplicateReason: 'Tabelle bereits vorhanden' });
+
+  await run('create_shared_shift_entry_table', async () => {
+    await dbPool.execute(`
+      CREATE TABLE IF NOT EXISTS shared_shift_entry (
+        id VARCHAR(36) PRIMARY KEY,
+        shared_workplace_id VARCHAR(36) NOT NULL,
+        date DATE NOT NULL,
+        employee_id VARCHAR(36) NOT NULL,
+        billing_tenant_id VARCHAR(36) NOT NULL,
+        start_time TIME DEFAULT NULL,
+        end_time TIME DEFAULT NULL,
+        note TEXT DEFAULT NULL,
+        created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
+        updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+        created_by VARCHAR(255) DEFAULT NULL,
+        INDEX idx_sse_date (date),
+        INDEX idx_sse_emp_date (employee_id, date),
+        INDEX idx_sse_billing (billing_tenant_id, date),
+        INDEX idx_sse_workplace_date (shared_workplace_id, date),
+        CONSTRAINT fk_sse_workplace FOREIGN KEY (shared_workplace_id) REFERENCES shared_workplace(id) ON DELETE CASCADE,
+        CONSTRAINT fk_sse_billing FOREIGN KEY (billing_tenant_id) REFERENCES db_tokens(id)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+    `);
+  }, { duplicateCodes: ['ER_TABLE_EXISTS_ERROR'], duplicateReason: 'Tabelle bereits vorhanden' });
+
+  await run('create_shared_workplace_quota_table', async () => {
+    await dbPool.execute(`
+      CREATE TABLE IF NOT EXISTS shared_workplace_quota (
+        shared_workplace_id VARCHAR(36) NOT NULL,
+        scope ENUM('person','tenant','role') NOT NULL,
+        scope_key VARCHAR(64) NOT NULL,
+        period ENUM('month','quarter','year') NOT NULL DEFAULT 'month',
+        max_count INT DEFAULT NULL,
+        target_count INT DEFAULT NULL,
+        weight DECIMAL(4,2) NOT NULL DEFAULT 1.00,
+        PRIMARY KEY (shared_workplace_id, scope, scope_key, period),
+        CONSTRAINT fk_swq_workplace FOREIGN KEY (shared_workplace_id) REFERENCES shared_workplace(id) ON DELETE CASCADE
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+    `);
+  }, { duplicateCodes: ['ER_TABLE_EXISTS_ERROR'], duplicateReason: 'Tabelle bereits vorhanden' });
+
+  await run('add_app_users_allowed_groups', async () => {
+    const changed = await addColumnIfMissing('app_users', 'allowed_groups', 'JSON DEFAULT NULL');
+    return changed || SKIPPED;
+  }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalte bereits vorhanden', skippedReason: 'Spalte bereits vorhanden' });
+
+  await run('add_app_users_group_admin_groups', async () => {
+    const changed = await addColumnIfMissing('app_users', 'group_admin_groups', 'JSON DEFAULT NULL');
+    return changed || SKIPPED;
+  }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalte bereits vorhanden', skippedReason: 'Spalte bereits vorhanden' });
+
   return results;
 }

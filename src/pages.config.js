@@ -4,6 +4,7 @@ import DataImport from './pages/DataImport';
 import Help from './pages/Help';
 import Home from './pages/Home';
 import MyDashboard from './pages/MyDashboard';
+import PoolSchedule from './pages/PoolSchedule';
 import Schedule from './pages/Schedule';
 import ServiceStaffing from './pages/ServiceStaffing';
 import Staff from './pages/Staff';
@@ -21,6 +22,7 @@ export const PAGES = {
     "Help": Help,
     "Home": Home,
     "MyDashboard": MyDashboard,
+    "PoolSchedule": PoolSchedule,
     "Schedule": Schedule,
     "ServiceStaffing": ServiceStaffing,
     "Staff": Staff,
