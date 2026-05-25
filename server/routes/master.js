@@ -1650,6 +1650,11 @@ router.post('/employees/:id/link-tenant', async (req, res, next) => {
       );
     });
 
+    await db.execute(
+      'DELETE FROM EmployeeTenantAssignment WHERE tenant_id = ? AND tenant_doctor_id = ? AND employee_id != ?',
+      [tenant_id, doctor_id, id]
+    );
+
     // Upsert EmployeeTenantAssignment
     const [existingAssign] = await db.execute(
       'SELECT id FROM EmployeeTenantAssignment WHERE employee_id = ? AND tenant_id = ?',
@@ -1672,6 +1677,55 @@ router.post('/employees/:id/link-tenant', async (req, res, next) => {
     res.json({ success: true });
   } catch (error) {
     console.error('[Master employees] Link error:', error);
+    next(error);
+  }
+});
+
+/**
+ * POST /api/master/employees/unlink-tenant
+ * Remove the central link for a tenant Doctor record
+ * Body: { tenant_id, doctor_id }
+ */
+router.post('/employees/unlink-tenant', async (req, res, next) => {
+  try {
+    const { tenant_id, doctor_id } = req.body;
+
+    if (!tenant_id || !doctor_id) {
+      return res.status(400).json({ error: 'tenant_id and doctor_id required' });
+    }
+
+    const tokens = await getAllTenantTokens(req.user.sub);
+    const token = tokens.find(t => t.id === tenant_id);
+    if (!token) {
+      return res.status(403).json({ error: 'Kein Zugriff auf diesen Mandanten' });
+    }
+
+    await withTenantDb(token, async (pool) => {
+      const [cols] = await pool.execute(
+        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+         WHERE TABLE_NAME = 'Doctor' AND COLUMN_NAME = 'central_employee_id' AND TABLE_SCHEMA = DATABASE()`
+      );
+      if (cols.length === 0) {
+        return [];
+      }
+
+      await pool.execute(
+        'UPDATE Doctor SET central_employee_id = NULL WHERE id = ?',
+        [doctor_id]
+      );
+
+      return [];
+    });
+
+    await db.execute(
+      'DELETE FROM EmployeeTenantAssignment WHERE tenant_id = ? AND tenant_doctor_id = ?',
+      [tenant_id, doctor_id]
+    );
+
+    console.log(`[Master employees] Unlinked tenant ${tenant_id} doctor ${doctor_id} by user ${req.user.sub}`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[Master employees] Unlink error:', error);
     next(error);
   }
 });

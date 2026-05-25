@@ -31,6 +31,8 @@ import { DoctorQualificationBadges } from '@/components/staff/DoctorQualificatio
 import { useQualifications, useAllDoctorQualifications } from '@/hooks/useQualifications';
 import QualificationOverview from '@/components/staff/QualificationOverview';
 import { toast } from 'sonner';
+import { getActiveTokenId } from '@/components/dbTokenStorage';
+import { syncTenantDoctorCentralLink } from '@/components/staff/centralLinkSync';
 
 export default function StaffPage() {
   const { isReadOnly, user } = useAuth();
@@ -105,6 +107,12 @@ export default function StaffPage() {
     mutationFn: async (data) => {
       const { _qualificationIds, ...doctorData } = data;
       const result = await db.Doctor.create({...doctorData, order: doctors.length});
+      await syncTenantDoctorCentralLink({
+        doctorId: result?.id,
+        tenantId: getActiveTokenId(),
+        previousCentralEmployeeId: null,
+        nextCentralEmployeeId: doctorData.central_employee_id,
+      });
       // Direkt nach dem Anlegen die Qualifikationen zuweisen, falls vorhanden
       if (_qualificationIds && _qualificationIds.length > 0 && result?.id) {
         try {
@@ -131,7 +139,16 @@ export default function StaffPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }) => db.Doctor.update(id, data),
+    mutationFn: async ({ id, data, previousCentralEmployeeId }) => {
+      const result = await db.Doctor.update(id, data);
+      await syncTenantDoctorCentralLink({
+        doctorId: id,
+        tenantId: getActiveTokenId(),
+        previousCentralEmployeeId,
+        nextCentralEmployeeId: data.central_employee_id,
+      });
+      return result;
+    },
     onSuccess: () => {
       trackDbChange();
       queryClient.invalidateQueries({ queryKey: ["doctors"] });
@@ -156,7 +173,11 @@ export default function StaffPage() {
       // Bei Bearbeitung keine Qualifikationen über das Formular senden
       // (werden weiterhin über den Editor selbst gesteuert)
       const { _qualificationIds, ...cleanData } = data;
-      updateMutation.mutate({ id: editingDoctor.id, data: cleanData });
+      updateMutation.mutate({
+        id: editingDoctor.id,
+        data: cleanData,
+        previousCentralEmployeeId: editingDoctor.central_employee_id || null,
+      });
     } else {
       createMutation.mutate(data);
     }
