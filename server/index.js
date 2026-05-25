@@ -121,6 +121,11 @@ const sanitizeRequestPath = (requestPath) => {
   return requestPath.split('?')[0];
 };
 
+const isTenantAccessDeniedError = (error) => (
+  error?.code === 'ER_ACCESS_DENIED_ERROR'
+  || error?.code === 'ER_DBACCESS_DENIED_ERROR'
+);
+
 const wrapPoolWithRetry = (pool, { poolLabel, onFinalFailure } = {}) => {
   if (!pool || pool.__curaflowRetryWrapped) {
     return pool;
@@ -292,7 +297,7 @@ export const getTenantDb = (dbToken) => {
     }), {
       poolLabel: `tenant:${config.host}/${config.database}`,
       onFinalFailure: async (error) => {
-        if (dbToken && (isTransientDbError(error) || error.code === 'ER_ACCESS_DENIED_ERROR')) {
+        if (dbToken && (isTransientDbError(error) || isTenantAccessDeniedError(error))) {
           removeTenantPool(dbToken);
         }
       }

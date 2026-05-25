@@ -4,6 +4,7 @@ import { authMiddleware } from './auth.js';
 import crypto from 'crypto';
 import { broadcastPlanUpdate, buildRealtimeScope, isPlanSyncEntity } from '../utils/realtime.js';
 import { COLUMNS_CACHE, clearColumnsCache, ensureColumns } from '../utils/schema.js';
+import { ensureTenantBaseTables } from '../scripts/seed-runtime-shared.js';
 
 const router = express.Router();
 
@@ -18,6 +19,31 @@ const PUBLIC_READ_TABLES = [
   'DoctorQualification',
   'WorkplaceQualification'
 ];
+
+const TENANT_BASE_TABLES = [
+  'Doctor',
+  'Workplace',
+  'ShiftEntry',
+  'WishRequest',
+  'TrainingRotation',
+  'ScheduleRule',
+  'ColorSetting',
+  'ScheduleNote',
+  'SystemSetting',
+  'CustomHoliday',
+  'StaffingPlanEntry',
+  'ShiftNotification',
+  'DemoSetting',
+  'BackupLog',
+  'SystemLog',
+  'VoiceAlias',
+  'TeamRole',
+  'Qualification',
+  'DoctorQualification',
+  'WorkplaceQualification',
+  'ScheduleBlock',
+];
+const TENANT_BASE_TABLE_SET = new Set(TENANT_BASE_TABLES);
 
 export { clearColumnsCache };
 
@@ -221,6 +247,21 @@ const buildDoctorConflictResponse = async (dbPool, data, excludeId = null) => {
   }
 
   return null;
+};
+
+const ensureTenantBaseSchema = async (dbPool, cacheKey) => {
+  const tableCheckKey = `${cacheKey}:tenant-base-schema:checked`;
+  if (COLUMNS_CACHE[tableCheckKey]) return;
+
+  try {
+    await ensureTenantBaseTables(dbPool);
+    clearColumnsCache(TENANT_BASE_TABLES, cacheKey);
+  } catch (err) {
+    console.error('Failed to ensure tenant base schema:', err.message);
+    throw err;
+  }
+
+  COLUMNS_CACHE[tableCheckKey] = true;
 };
 
 // Handle GET requests with helpful error
@@ -486,6 +527,10 @@ router.post('/', async (req, res, next) => {
       id: req.user?.sub || null,
       email: req.user?.email || 'system',
     };
+
+    if (req.isCustomDb && tableName && TENANT_BASE_TABLE_SET.has(tableName)) {
+      await ensureTenantBaseSchema(dbPool, cacheKey);
+    }
     
     // Auto-create TeamRole table for tenants if needed
     if (tableName === 'TeamRole') {
@@ -951,7 +996,7 @@ router.post('/', async (req, res, next) => {
     console.error("Request body:", JSON.stringify(req.body || {}).substring(0, 500));
     
     // If this is an access denied error and we have a custom DB token, remove it from cache
-    if (error.code === 'ER_ACCESS_DENIED_ERROR' && req.dbToken) {
+    if ((error.code === 'ER_ACCESS_DENIED_ERROR' || error.code === 'ER_DBACCESS_DENIED_ERROR') && req.dbToken) {
       console.log("Removing invalid tenant pool from cache due to access denied error");
       removeTenantPool(req.dbToken);
     }

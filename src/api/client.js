@@ -83,6 +83,18 @@ function createRequestError(message, extras = {}) {
   return error;
 }
 
+export function resolveRequestRetryable({ status, errorData, databaseError }) {
+  if (!databaseError) {
+    return false;
+  }
+
+  if (typeof errorData?.retryable === 'boolean') {
+    return errorData.retryable;
+  }
+
+  return status >= 500 || status === 503;
+}
+
 class APIClient {
   constructor() {
     this.baseURL = API_URL;
@@ -141,7 +153,11 @@ class APIClient {
             code: errorData?.code,
             details: errorData,
             databaseError,
-            retryable: databaseError && (response.status >= 500 || response.status === 503),
+            retryable: resolveRequestRetryable({
+              status: response.status,
+              errorData,
+              databaseError,
+            }),
           });
         }
 
