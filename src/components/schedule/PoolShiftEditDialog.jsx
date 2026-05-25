@@ -42,6 +42,7 @@ export default function PoolShiftEditDialog({
     date,
     shift,
     activeTenantId,
+    busyEmployeeIds,
 }) {
     const queryClient = useQueryClient();
     const isEdit = !!shift;
@@ -70,6 +71,19 @@ export default function PoolShiftEditDialog({
 
     const staff = staffQuery.data?.staff || [];
     const requiredQuals = staffQuery.data?.required || [];
+
+    // Hide employees that are already absent on this date (Frei, Krank, Urlaub,
+    // cross-tenant pool shift, or auto-frei from a previous-day on-call). The
+    // current shift's employee is always kept so the edit dialog can show them.
+    const visibleStaff = useMemo(() => {
+        if (!busyEmployeeIds || busyEmployeeIds.size === 0) return staff;
+        const currentEmp = shift?.employee_id ? String(shift.employee_id) : null;
+        return staff.filter((s) => {
+            const id = String(s.id);
+            if (id === currentEmp) return true;
+            return !busyEmployeeIds.has(id);
+        });
+    }, [staff, busyEmployeeIds, shift]);
 
     // Distinct list of tenant ids the chosen employee is assigned to.
     // We let the admin pick which tenant gets billed for the shift.
@@ -156,6 +170,10 @@ export default function PoolShiftEditDialog({
                                     ? `Kein berechtigter Mitarbeiter (Pflicht-Qualifikationen: ${requiredQuals.join(', ')}).`
                                     : 'Keine Pool-Mitarbeiter in dieser Gruppe gefunden.'}
                             </div>
+                        ) : visibleStaff.length === 0 ? (
+                            <div className="text-sm text-slate-500">
+                                Alle berechtigten Mitarbeiter sind an diesem Tag verhindert (Frei, Urlaub, Krank oder bereits eingeteilt).
+                            </div>
                         ) : (
                             <>
                             {requiredQuals.length > 0 && (
@@ -168,7 +186,7 @@ export default function PoolShiftEditDialog({
                                     <SelectValue placeholder="Mitarbeiter wählen" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {staff.map((s) => (
+                                    {visibleStaff.map((s) => (
                                         <SelectItem key={s.id} value={s.id}>
                                             {[s.last_name, s.first_name].filter(Boolean).join(', ') || s.id}
                                         </SelectItem>

@@ -282,6 +282,51 @@ export default function ServiceStaffingPage() {
         return map;
     }, [allShifts, crossTenantShifts, doctors, isPublicHoliday]);
 
+    // Map of date → Set of central_employee_ids that are busy on that date.
+    // Used to filter the PoolShiftEditDialog dropdown so users cannot pick an
+    // employee who is already absent. Covers local tenant absences (mapped via
+    // Doctor.central_employee_id) and cross-tenant pool shifts (same day +
+    // next-workday auto-frei).
+    const busyCentralIdsByDate = useMemo(() => {
+        const ABSENCE_POSITIONS = ['Frei', 'Krank', 'Urlaub', 'Dienstreise', 'Nicht verfügbar'];
+        const doctorToCentral = new Map();
+        for (const d of doctors) {
+            if (d.central_employee_id) doctorToCentral.set(d.id, String(d.central_employee_id));
+        }
+        const map = {};
+        const add = (dateStr, centralId) => {
+            const key = String(dateStr).slice(0, 10);
+            if (!map[key]) map[key] = new Set();
+            map[key].add(String(centralId));
+        };
+        const nextWorkdayIso = (dateStr) => {
+            const next = new Date(`${dateStr}T00:00:00Z`);
+            next.setUTCDate(next.getUTCDate() + 1);
+            const day = next.getUTCDay();
+            if (day === 0 || day === 6) return null;
+            const iso = next.toISOString().slice(0, 10);
+            try { if (isPublicHoliday(next)) return null; } catch { /* ignore */ }
+            return iso;
+        };
+        for (const s of allShifts) {
+            if (!ABSENCE_POSITIONS.includes(s.position)) continue;
+            const central = doctorToCentral.get(s.doctor_id);
+            if (central) add(s.date, central);
+        }
+        for (const s of crossTenantShifts) {
+            if (!s.employee_id) continue;
+            const dateStr = String(s.date).slice(0, 10);
+            if (s.affects_availability !== false) add(dateStr, s.employee_id);
+            const impliesAutoFrei = s.auto_off === true
+                || (s.auto_off == null && s.workplace_category === 'Dienste');
+            if (impliesAutoFrei) {
+                const nd = nextWorkdayIso(dateStr);
+                if (nd) add(nd, s.employee_id);
+            }
+        }
+        return map;
+    }, [allShifts, crossTenantShifts, doctors, isPublicHoliday]);
+
     const sendNotificationsMutation = useMutation({
         mutationFn: async () => {
             const data = await api.sendScheduleNotifications(
@@ -864,6 +909,7 @@ export default function ServiceStaffingPage() {
                 workplace={poolEditDialog.workplace}
                 date={poolEditDialog.date}
                 shift={poolEditDialog.shift}
+                busyEmployeeIds={poolEditDialog.date ? (busyCentralIdsByDate[poolEditDialog.date] || new Set()) : new Set()}
             />
 
             <style>{`
