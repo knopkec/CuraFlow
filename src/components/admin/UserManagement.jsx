@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Loader2, Shield, ShieldAlert, UserCog, UserPlus, Trash2, Database, Check, Mail, MailCheck, MailX, Send } from 'lucide-react';
+import { Loader2, Shield, ShieldAlert, UserCog, UserPlus, Trash2, Database, Check, Mail, MailCheck, MailX, Send, Globe2, PenSquare } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from '@/components/ui/checkbox';
 import { useAuth } from '@/components/AuthProvider';
@@ -33,11 +33,31 @@ function parseAllowedTenants(rawAllowedTenants) {
     return Array.isArray(parsed) ? parsed.map(String) : [];
 }
 
+function parseGroupIds(rawValue) {
+    if (rawValue === null || rawValue === undefined || rawValue === '') {
+        return [];
+    }
+
+    const parsed = typeof rawValue === 'string'
+        ? (() => {
+            try {
+                return JSON.parse(rawValue);
+            } catch (error) {
+                console.error('[UserManagement] Failed to parse group ids:', rawValue, error);
+                return [];
+            }
+        })()
+        : rawValue;
+
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+}
+
 export default function UserManagement() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
     const [showCreateDialog, setShowCreateDialog] = useState(false);
     const [showTenantDialog, setShowTenantDialog] = useState(false);
+    const [showGroupDialog, setShowGroupDialog] = useState(false);
     const [tenantFilter, setTenantFilter] = useState('');
     const [selectedUser, setSelectedUser] = useState(null);
     const [newUser, setNewUser] = useState({ email: '', full_name: '', password: '', role: 'user' });
@@ -108,6 +128,15 @@ export default function UserManagement() {
         staleTime: 5 * 60 * 1000,
         refetchOnWindowFocus: false,
     });
+
+    const { data: groupResponse } = useQuery({
+        queryKey: ['adminTenantGroupsForUsers'],
+        queryFn: () => api.listGroups(),
+        staleTime: 5 * 60 * 1000,
+        refetchOnWindowFocus: false,
+    });
+
+    const groups = Array.isArray(groupResponse?.groups) ? groupResponse.groups : [];
 
     const updateUserMutation = useMutation({
         mutationFn: async ({ id, data }) => {
@@ -224,6 +253,7 @@ export default function UserManagement() {
                             <TableHead>Rolle</TableHead>
                             <TableHead>Zugeordnete Person</TableHead>
                             <TableHead>Mandanten</TableHead>
+                            <TableHead>Verbünde</TableHead>
                             <TableHead>E-Mail Status</TableHead>
                             <TableHead>Status</TableHead>
                             <TableHead className="text-right">Aktionen</TableHead>
@@ -234,6 +264,8 @@ export default function UserManagement() {
                             const userTenants = user.allowed_tenants ? 
                                 (typeof user.allowed_tenants === 'string' ? JSON.parse(user.allowed_tenants) : user.allowed_tenants) 
                                 : null;
+                            const allowedGroups = parseGroupIds(user.allowed_groups);
+                            const adminGroups = parseGroupIds(user.group_admin_groups);
                             const tenantCount = userTenants?.length || 0;
                             const hasAllAccess = !userTenants || userTenants.length === 0;
                             
@@ -283,6 +315,25 @@ export default function UserManagement() {
                                             <span className="text-green-600">Alle</span>
                                         ) : (
                                             <span>{tenantCount} von {tenants.length}</span>
+                                        )}
+                                    </Button>
+                                </TableCell>
+                                <TableCell>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="gap-1"
+                                        data-testid={`admin-user-groups-${user.id}`}
+                                        onClick={() => {
+                                            setSelectedUser(user);
+                                            setShowGroupDialog(true);
+                                        }}
+                                    >
+                                        <Globe2 className="w-3 h-3" />
+                                        {allowedGroups.length === 0 ? (
+                                            <span>Keine</span>
+                                        ) : (
+                                            <span>{allowedGroups.length} / {adminGroups.length} schreibbar</span>
                                         )}
                                     </Button>
                                 </TableCell>
@@ -495,6 +546,39 @@ export default function UserManagement() {
                     )}
                 </DialogContent>
             </Dialog>
+
+            <Dialog open={showGroupDialog} onOpenChange={(open) => {
+                setShowGroupDialog(open);
+                if (!open) setSelectedUser(null);
+            }}>
+                <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Globe2 className="w-5 h-5" />
+                            Verbund-Rechte
+                        </DialogTitle>
+                    </DialogHeader>
+                    {selectedUser && (
+                        <GroupAccessSelector
+                            user={selectedUser}
+                            groups={groups}
+                            onSave={({ allowedGroups, adminGroups }) => {
+                                updateUserMutation.mutate({
+                                    id: selectedUser.id,
+                                    data: {
+                                        allowed_groups: allowedGroups,
+                                        group_admin_groups: adminGroups,
+                                    }
+                                }, {
+                                    onSuccess: () => setShowGroupDialog(false)
+                                });
+                            }}
+                            onClose={() => setShowGroupDialog(false)}
+                            isLoading={updateUserMutation.isPending}
+                        />
+                    )}
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
@@ -609,6 +693,108 @@ function TenantSelector({ user, tenants, adminHasFullAccess, onSave, onClose, is
                     disabled={isLoading}
                     className="bg-indigo-600 hover:bg-indigo-700"
                     data-testid="admin-user-tenant-save"
+                >
+                    {isLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                    Speichern
+                </Button>
+            </DialogFooter>
+        </div>
+    );
+}
+
+function GroupAccessSelector({ user, groups, onSave, onClose, isLoading }) {
+    const [selectedGroups, setSelectedGroups] = useState(parseGroupIds(user.allowed_groups));
+    const [adminGroups, setAdminGroups] = useState(parseGroupIds(user.group_admin_groups));
+
+    const toggleReadGroup = (groupId) => {
+        setSelectedGroups((current) => {
+            if (current.includes(groupId)) {
+                setAdminGroups((adminCurrent) => adminCurrent.filter((entry) => entry !== groupId));
+                return current.filter((entry) => entry !== groupId);
+            }
+            return [...current, groupId];
+        });
+    };
+
+    const toggleWriteGroup = (groupId) => {
+        setSelectedGroups((current) => (current.includes(groupId) ? current : [...current, groupId]));
+        setAdminGroups((current) => (
+            current.includes(groupId)
+                ? current.filter((entry) => entry !== groupId)
+                : [...current, groupId]
+        ));
+    };
+
+    const handleSave = () => {
+        const normalizedAllowedGroups = selectedGroups;
+        const normalizedAdminGroups = adminGroups.filter((groupId) => normalizedAllowedGroups.includes(groupId));
+        onSave({
+            allowedGroups: normalizedAllowedGroups,
+            adminGroups: normalizedAdminGroups,
+        });
+    };
+
+    return (
+        <div className="space-y-4">
+            <div className="text-sm text-slate-600">
+                Benutzer: <span className="font-medium">{user.full_name || user.email}</span>
+            </div>
+
+            {groups.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-4 text-sm text-slate-500">
+                    Es sind noch keine Verbünde angelegt.
+                </div>
+            ) : (
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                    <Label>Verbundrechte:</Label>
+                    {groups.map((group) => {
+                        const groupId = String(group.id);
+                        const canRead = selectedGroups.includes(groupId);
+                        const canWrite = adminGroups.includes(groupId);
+                        return (
+                            <div key={groupId} className="rounded-lg border p-3" data-testid={`admin-user-group-option-${groupId}`}>
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="space-y-1">
+                                        <div className="font-medium text-sm">{group.name}</div>
+                                        {group.description ? (
+                                            <div className="text-xs text-slate-500">{group.description}</div>
+                                        ) : null}
+                                    </div>
+                                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                                        {group.is_active ? 'Aktiv' : 'Inaktiv'}
+                                    </div>
+                                </div>
+                                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                        <Checkbox
+                                            checked={canRead}
+                                            onCheckedChange={() => toggleReadGroup(groupId)}
+                                            data-testid={`admin-user-group-read-${groupId}`}
+                                        />
+                                        Sichtrecht
+                                    </label>
+                                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                                        <Checkbox
+                                            checked={canWrite}
+                                            onCheckedChange={() => toggleWriteGroup(groupId)}
+                                            data-testid={`admin-user-group-write-${groupId}`}
+                                        />
+                                        <PenSquare className="w-3.5 h-3.5 text-indigo-600" /> Schreibrecht
+                                    </label>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
+            <DialogFooter>
+                <Button variant="outline" onClick={onClose}>Abbrechen</Button>
+                <Button
+                    onClick={handleSave}
+                    disabled={isLoading}
+                    className="bg-indigo-600 hover:bg-indigo-700"
+                    data-testid="admin-user-group-save"
                 >
                     {isLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
                     Speichern

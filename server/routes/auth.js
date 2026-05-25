@@ -216,7 +216,7 @@ function sanitizeUser(user) {
   const { password_hash, ...safe } = user;
   
   // Parse JSON fields
-  const jsonFields = ['allowed_tenants', 'collapsed_sections', 'schedule_hidden_rows', 'wish_hidden_doctors'];
+  const jsonFields = ['allowed_tenants', 'allowed_groups', 'group_admin_groups', 'collapsed_sections', 'schedule_hidden_rows', 'wish_hidden_doctors'];
   for (const field of jsonFields) {
     if (safe[field] && typeof safe[field] === 'string') {
       try {
@@ -513,7 +513,7 @@ router.patch('/users/:userId', authMiddleware, adminMiddleware, async (req, res,
     
     // Admin can update more fields
     const allowedFields = [
-      'full_name', 'role', 'doctor_id', 'is_active', 'allowed_tenants',
+      'full_name', 'role', 'doctor_id', 'is_active', 'allowed_tenants', 'allowed_groups', 'group_admin_groups',
       'theme', 'section_config', 'collapsed_sections',
       'schedule_hidden_rows', 'schedule_show_sidebar', 'highlight_my_name',
       'grid_font_size', 'wish_show_occupied', 'wish_show_absences', 'wish_hidden_doctors', 'wish_default_position'
