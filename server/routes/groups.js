@@ -138,7 +138,8 @@ router.get('/visible-shifts', async (req, res) => {
                   e.last_name
          FROM shared_shift_entry s
          JOIN shared_workplace w ON w.id = s.shared_workplace_id
-         LEFT JOIN Employee e ON e.id = s.employee_id
+          LEFT JOIN Employee e
+            ON e.id COLLATE utf8mb4_general_ci = s.employee_id COLLATE utf8mb4_general_ci
         WHERE w.group_id IN (${placeholders})
           AND w.is_active = 1
           ${dateWhere}
