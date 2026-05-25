@@ -14,8 +14,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import SharedTimeslotEditor from '@/components/admin/SharedTimeslotEditor';
+import SharedWorkplaceQualificationsDialog from '@/components/admin/SharedWorkplaceQualificationsDialog';
 import { SERVICE_TYPES } from '@/components/settings/serviceTypes';
-import { Building2, Clock, Globe2, Loader2, Pencil, Plus, Trash2, Users } from 'lucide-react';
+import { Building2, Clock, Globe2, Loader2, Pencil, Plus, ShieldCheck, Trash2, Users } from 'lucide-react';
 
 const DEFAULT_GROUP_FORM = {
     name: '',
@@ -82,6 +83,7 @@ export default function TenantGroupManagement() {
     const [showWorkplaceDialog, setShowWorkplaceDialog] = useState(false);
     const [editingWorkplace, setEditingWorkplace] = useState(null);
     const [workplaceForm, setWorkplaceForm] = useState(DEFAULT_WORKPLACE_FORM);
+    const [qualificationsWorkplace, setQualificationsWorkplace] = useState(null);
     const [tenantToAdd, setTenantToAdd] = useState('');
 
     const { data: groupsResponse, isLoading: groupsLoading } = useQuery({
@@ -647,6 +649,14 @@ export default function TenantGroupManagement() {
                                                         <Button
                                                             variant="outline"
                                                             size="sm"
+                                                            onClick={() => setQualificationsWorkplace(workplace)}
+                                                            title="Pflicht-Qualifikationen verwalten"
+                                                        >
+                                                            <ShieldCheck className="mr-1 h-3.5 w-3.5" /> Qualifikationen
+                                                        </Button>
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
                                                             className="text-red-600 hover:bg-red-50 hover:text-red-700"
                                                             onClick={() => handleDeleteWorkplace(workplace)}
                                                         >
@@ -941,6 +951,13 @@ export default function TenantGroupManagement() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            <SharedWorkplaceQualificationsDialog
+                open={!!qualificationsWorkplace}
+                onOpenChange={(next) => { if (!next) setQualificationsWorkplace(null); }}
+                groupId={selectedGroupId}
+                workplace={qualificationsWorkplace}
+            />
         </div>
     );
 }

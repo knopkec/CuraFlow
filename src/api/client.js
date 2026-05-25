@@ -459,6 +459,25 @@ class APIClient {
     return this.request(`/api/groups/${encodeURIComponent(groupId)}/staff`);
   }
 
+  async getGroupQualifications(groupId) {
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}/qualifications`);
+  }
+
+  async getWorkplaceQualifications(groupId, workplaceId) {
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}/workplaces/${encodeURIComponent(workplaceId)}/qualifications`);
+  }
+
+  async replaceWorkplaceQualifications(groupId, workplaceId, qualifications) {
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}/workplaces/${encodeURIComponent(workplaceId)}/qualifications`, {
+      method: 'PUT',
+      body: JSON.stringify({ qualifications }),
+    });
+  }
+
+  async getWorkplaceEligibleStaff(groupId, workplaceId) {
+    return this.request(`/api/groups/${encodeURIComponent(groupId)}/workplaces/${encodeURIComponent(workplaceId)}/eligible-staff`);
+  }
+
   async getGroupSchedule(groupId, { from, to } = {}) {
     const params = new URLSearchParams();
     if (from) params.set('from', from);

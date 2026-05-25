@@ -17,7 +17,7 @@ import CoWorkWidget from '@/components/CoWorkWidget';
 import TicketDialog from '@/components/TicketDialog';
 
 function LayoutContent({ children }) {
-  const { isAuthenticated, isReadOnly, isLoading, mustChangePassword, setMustChangePassword, hasGroupAccess } = useAuth();
+  const { isAuthenticated, isReadOnly, isLoading, mustChangePassword, setMustChangePassword } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   
@@ -195,17 +195,6 @@ function LayoutContent({ children }) {
               <CalendarDays className="h-5 w-5 mr-3 text-slate-500 group-hover:text-indigo-600" />
               <span className="font-medium">Wochenplan</span>
             </Link>
-
-            {hasGroupAccess && (
-              <Link
-                to={createPageUrl('PoolSchedule')}
-                data-testid="nav-link-pool-schedule"
-                className="flex items-center rounded-lg px-3 py-2 text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 group transition-colors"
-              >
-                <Users className="h-5 w-5 mr-3 text-slate-500 group-hover:text-indigo-600" />
-                <span className="font-medium">Pool-Dienste</span>
-              </Link>
-            )}
 
             <Link
               to={createPageUrl('ServiceStaffing')}

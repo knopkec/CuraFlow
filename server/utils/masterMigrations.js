@@ -513,6 +513,20 @@ export async function runMasterMigrations(dbPool) {
     return true;
   }, { skippedReason: 'Spaltentyp bereits kompatibel' });
 
+  await run('create_shared_workplace_qualification_table', async () => {
+    await dbPool.execute(`
+      CREATE TABLE IF NOT EXISTS shared_workplace_qualification (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        shared_workplace_id VARCHAR(36) NOT NULL,
+        qualification_name VARCHAR(255) NOT NULL,
+        is_excluded TINYINT(1) NOT NULL DEFAULT 0,
+        created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
+        UNIQUE KEY uq_swq_workplace_name (shared_workplace_id, qualification_name),
+        CONSTRAINT fk_swq_qual_workplace FOREIGN KEY (shared_workplace_id) REFERENCES shared_workplace(id) ON DELETE CASCADE
+      ) ${fkTableSuffix}
+    `);
+  }, { duplicateCodes: ['ER_TABLE_EXISTS_ERROR'], duplicateReason: 'Tabelle bereits vorhanden' });
+
   await run('create_shared_workplace_quota_table', async () => {
     await dbPool.execute(`
       CREATE TABLE IF NOT EXISTS shared_workplace_quota (

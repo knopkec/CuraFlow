@@ -62,13 +62,14 @@ export default function PoolShiftEditDialog({
     }, [open, shift, activeTenantId]);
 
     const staffQuery = useQuery({
-        queryKey: ['pool', 'group-staff', groupId],
-        queryFn: () => api.getGroupStaff(groupId),
-        enabled: !!open && !!groupId,
+        queryKey: ['pool', 'eligible-staff', groupId, workplace?.id],
+        queryFn: () => api.getWorkplaceEligibleStaff(groupId, workplace.id),
+        enabled: !!open && !!groupId && !!workplace?.id,
         staleTime: 60_000,
     });
 
     const staff = staffQuery.data?.staff || [];
+    const requiredQuals = staffQuery.data?.required || [];
 
     // Distinct list of tenant ids the chosen employee is assigned to.
     // We let the admin pick which tenant gets billed for the shift.
@@ -151,9 +152,17 @@ export default function PoolShiftEditDialog({
                             </div>
                         ) : staff.length === 0 ? (
                             <div className="text-sm text-slate-500">
-                                Keine Pool-Mitarbeiter in dieser Gruppe gefunden.
+                                {requiredQuals.length > 0
+                                    ? `Kein berechtigter Mitarbeiter (Pflicht-Qualifikationen: ${requiredQuals.join(', ')}).`
+                                    : 'Keine Pool-Mitarbeiter in dieser Gruppe gefunden.'}
                             </div>
                         ) : (
+                            <>
+                            {requiredQuals.length > 0 && (
+                                <div className="text-[11px] text-slate-500">
+                                    Pflicht-Qualifikationen: {requiredQuals.join(', ')}
+                                </div>
+                            )}
                             <Select value={employeeId} onValueChange={setEmployeeId}>
                                 <SelectTrigger id="pool-shift-employee">
                                     <SelectValue placeholder="Mitarbeiter wählen" />
@@ -166,6 +175,7 @@ export default function PoolShiftEditDialog({
                                     ))}
                                 </SelectContent>
                             </Select>
+                            </>
                         )}
                     </div>
 

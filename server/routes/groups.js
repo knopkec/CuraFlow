@@ -601,6 +601,222 @@ router.delete('/:groupId/workplaces/:workplaceId', async (req, res) => {
   }
 });
 
+// ============ REQUIRED QUALIFICATIONS PER SHARED WORKPLACE ============
+// Stored as plain qualification names (cross-tenant taxonomy by name).
+// A central employee is "eligible" for a workplace when, in any of his/her
+// tenants of the group, the union of Qualification.name held via
+// DoctorQualification contains every required name (and none of the excluded).
+
+router.get('/:groupId/workplaces/:workplaceId/qualifications', async (req, res) => {
+  try {
+    const ctx = await loadCtx(req, res);
+    if (!ctx) return;
+    await requireGroupReadAccess(db, ctx, req.params.groupId);
+    const [rows] = await db.execute(
+      `SELECT id, qualification_name, is_excluded
+         FROM shared_workplace_qualification
+        WHERE shared_workplace_id = ?
+        ORDER BY qualification_name ASC`,
+      [req.params.workplaceId]
+    );
+    res.json({
+      qualifications: rows.map((r) => ({
+        id: r.id,
+        qualification_name: r.qualification_name,
+        is_excluded: !!r.is_excluded,
+      })),
+    });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+router.put('/:groupId/workplaces/:workplaceId/qualifications', async (req, res) => {
+  try {
+    const ctx = await loadCtx(req, res);
+    if (!ctx) return;
+    requireGroupWriteAccess(ctx, req.params.groupId);
+    const list = Array.isArray(req.body?.qualifications) ? req.body.qualifications : [];
+    const cleaned = list
+      .map((item) => ({
+        name: String(item?.qualification_name || item?.name || '').trim(),
+        excluded: !!(item?.is_excluded ?? item?.excluded),
+      }))
+      .filter((item) => item.name.length > 0 && item.name.length <= 255);
+
+    const conn = await db.getConnection();
+    try {
+      await conn.beginTransaction();
+      await conn.execute(
+        'DELETE FROM shared_workplace_qualification WHERE shared_workplace_id = ?',
+        [req.params.workplaceId]
+      );
+      for (const item of cleaned) {
+        await conn.execute(
+          `INSERT IGNORE INTO shared_workplace_qualification
+             (shared_workplace_id, qualification_name, is_excluded)
+           VALUES (?, ?, ?)`,
+          [req.params.workplaceId, item.name, item.excluded ? 1 : 0]
+        );
+      }
+      await conn.commit();
+    } catch (err) {
+      await conn.rollback().catch(() => {});
+      throw err;
+    } finally {
+      conn.release();
+    }
+    res.status(204).end();
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// Distinct qualification names found in any tenant of the group.
+// Used by the admin form as a picker so the operator does not need to type
+// names by hand. Order: alphabetical.
+router.get('/:groupId/qualifications', async (req, res) => {
+  try {
+    const ctx = await loadCtx(req, res);
+    if (!ctx) return;
+    await requireGroupReadAccess(db, ctx, req.params.groupId);
+    const tenantIds = await loadGroupTenantIds(db, req.params.groupId);
+    if (tenantIds.length === 0) return res.json({ qualifications: [] });
+
+    const allNames = new Set();
+    for (const tenantId of tenantIds) {
+      const token = await loadTenantTokenById(tenantId);
+      if (!token) continue;
+      try {
+        await withTenantDb(token, async (pool) => {
+          const [rows] = await pool.execute('SELECT DISTINCT name FROM Qualification WHERE name IS NOT NULL');
+          for (const row of rows) {
+            const name = String(row.name || '').trim();
+            if (name) allNames.add(name);
+          }
+        });
+      } catch (err) {
+        console.warn(`[groups] qualifications scan failed for tenant ${tenantId}:`, err.message);
+      }
+    }
+    res.json({ qualifications: Array.from(allNames).sort((a, b) => a.localeCompare(b, 'de')) });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// Returns central employees eligible to staff the given shared workplace.
+// "Eligible" = the union of qualification names this employee holds across
+// his/her assigned tenants in the group covers every required name and
+// includes none of the excluded names. If the workplace has no qualification
+// rules, all group staff are returned (same as /staff).
+router.get('/:groupId/workplaces/:workplaceId/eligible-staff', async (req, res) => {
+  try {
+    const ctx = await loadCtx(req, res);
+    if (!ctx) return;
+    await requireGroupReadAccess(db, ctx, req.params.groupId);
+    const tenantIds = await loadGroupTenantIds(db, req.params.groupId);
+    if (tenantIds.length === 0) return res.json({ staff: [], required: [], excluded: [] });
+
+    const [qualRows] = await db.execute(
+      `SELECT qualification_name, is_excluded
+         FROM shared_workplace_qualification
+        WHERE shared_workplace_id = ?`,
+      [req.params.workplaceId]
+    );
+    const required = qualRows.filter((r) => !r.is_excluded).map((r) => r.qualification_name);
+    const excluded = qualRows.filter((r) => r.is_excluded).map((r) => r.qualification_name);
+
+    // Load all group staff (same shape as /staff)
+    const placeholders = tenantIds.map(() => '?').join(',');
+    const [staffRows] = await db.execute(
+      `SELECT e.id, e.last_name, e.first_name, e.payroll_id, e.is_active,
+              GROUP_CONCAT(DISTINCT eta.tenant_id) AS tenant_ids,
+              MAX(CASE WHEN eta.is_primary THEN eta.tenant_id END) AS primary_tenant_id
+         FROM Employee e
+         JOIN EmployeeTenantAssignment eta
+           ON eta.employee_id COLLATE utf8mb4_general_ci = e.id COLLATE utf8mb4_general_ci
+        WHERE eta.tenant_id IN (${placeholders})
+          AND e.is_active = 1
+        GROUP BY e.id
+        ORDER BY e.last_name, e.first_name`,
+      tenantIds.map(String)
+    );
+
+    // If no rules, return everyone (cheap path)
+    if (required.length === 0 && excluded.length === 0) {
+      return res.json({
+        staff: staffRows.map((r) => ({
+          id: r.id,
+          last_name: r.last_name,
+          first_name: r.first_name,
+          payroll_id: r.payroll_id,
+          is_active: !!r.is_active,
+          tenant_ids: r.tenant_ids ? String(r.tenant_ids).split(',') : [],
+          primary_tenant_id: r.primary_tenant_id ? String(r.primary_tenant_id) : null,
+          qualifications: [],
+        })),
+        required, excluded,
+      });
+    }
+
+    // Build employee → set of qualification names by scanning each tenant DB.
+    const employeeQuals = new Map(); // employee_id (string) → Set<string>
+    for (const tenantId of tenantIds) {
+      const token = await loadTenantTokenById(tenantId);
+      if (!token) continue;
+      try {
+        await withTenantDb(token, async (pool) => {
+          const [rows] = await pool.execute(
+            `SELECT d.central_employee_id AS emp_id, q.name AS qname
+               FROM Doctor d
+               JOIN DoctorQualification dq ON dq.doctor_id = d.id
+               JOIN Qualification q ON q.id = dq.qualification_id
+              WHERE d.central_employee_id IS NOT NULL`
+          );
+          for (const row of rows) {
+            const empId = String(row.emp_id);
+            const qname = String(row.qname || '').trim();
+            if (!qname) continue;
+            if (!employeeQuals.has(empId)) employeeQuals.set(empId, new Set());
+            employeeQuals.get(empId).add(qname);
+          }
+        });
+      } catch (err) {
+        console.warn(`[groups] eligible-staff scan failed for tenant ${tenantId}:`, err.message);
+      }
+    }
+
+    const eligible = staffRows.filter((r) => {
+      const have = employeeQuals.get(String(r.id)) || new Set();
+      for (const req of required) {
+        if (!have.has(req)) return false;
+      }
+      for (const ex of excluded) {
+        if (have.has(ex)) return false;
+      }
+      return true;
+    });
+
+    res.json({
+      staff: eligible.map((r) => ({
+        id: r.id,
+        last_name: r.last_name,
+        first_name: r.first_name,
+        payroll_id: r.payroll_id,
+        is_active: !!r.is_active,
+        tenant_ids: r.tenant_ids ? String(r.tenant_ids).split(',') : [],
+        primary_tenant_id: r.primary_tenant_id ? String(r.primary_tenant_id) : null,
+        qualifications: Array.from(employeeQuals.get(String(r.id)) || []),
+      })),
+      required,
+      excluded,
+    });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
 router.get('/:groupId/workplaces/:workplaceId/timeslots', async (req, res) => {
   try {
     const ctx = await loadCtx(req, res);

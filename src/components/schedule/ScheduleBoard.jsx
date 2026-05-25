@@ -3,7 +3,7 @@ import { flushSync } from 'react-dom';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { format, addDays, subDays, startOfWeek, isSameDay, startOfMonth, endOfMonth, addMonths, eachDayOfInterval, isValid } from 'date-fns';
 import { de } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, ChevronDown, Wand2, Loader2, Trash2, Eye, EyeOff, Layout, Calendar, LayoutList, StickyNote, AlertTriangle, Download, Undo, ExternalLink, X, Lock, Unlock, Settings2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Wand2, Loader2, Trash2, Eye, EyeOff, Layout, Calendar, LayoutList, StickyNote, AlertTriangle, Download, Undo, ExternalLink, X, Lock, Unlock, Settings2, Globe2, Plus } from 'lucide-react';
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from '@/components/ui/button';
@@ -24,6 +24,7 @@ import { useAuth } from '@/components/AuthProvider';
 import DraggableDoctor from './DraggableDoctor';
 import DraggableShift from './DraggableShift';
 import DroppableCell from './DroppableCell';
+import PoolShiftEditDialog from './PoolShiftEditDialog';
 import WorkplaceConfigDialog from '@/components/settings/WorkplaceConfigDialog';
 import { generateSuggestions } from './autoFillEngine';
 import AutoFillSettingsDialog from './AutoFillSettingsDialog';
@@ -971,6 +972,26 @@ export default function ScheduleBoard() {
     });
 
     const visiblePoolShifts = visiblePoolData?.shifts || [];
+    const crossTenantWorkplaces = visiblePoolData?.workplaces || [];
+
+    // Map shifts by `${shared_workplace_id}|${date}` for fast cell lookup.
+    const crossTenantShiftsByCell = useMemo(() => {
+        const map = new Map();
+        for (const shift of visiblePoolShifts) {
+            const key = `${shift.shared_workplace_id}|${String(shift.date).slice(0, 10)}`;
+            const list = map.get(key) || [];
+            list.push(shift);
+            map.set(key, list);
+        }
+        return map;
+    }, [visiblePoolShifts]);
+
+    // Local state for the cross-tenant edit dialog launched from the board cells.
+    const [poolEditDialog, setPoolEditDialog] = useState({ open: false, workplace: null, date: null, shift: null });
+
+    const openPoolEditDialog = (workplace, dateStr, shift = null) => {
+        setPoolEditDialog({ open: true, workplace, date: dateStr, shift });
+    };
 
   // Query to fetch shifts for the 4-week fairness window relative to the planning period.
   // The autoFill engine uses 3 weeks before firstPlanDate → lastPlanDate.
@@ -1176,6 +1197,21 @@ export default function ScheduleBoard() {
           dynamicRows[categoryName] = createRowsForCategory(categoryName);
       }
 
+      // Append cross-tenant (group) workplaces to the "Dienste" section.
+      // These rows are NOT drop targets — they are managed via the
+      // PoolShiftEditDialog when the user clicks a cell.
+      for (const wp of crossTenantWorkplaces) {
+          dynamicRows["Dienste"].push({
+              name: `__cross_${wp.id}`,
+              displayName: `${wp.name} (Gruppendienst)`,
+              timeslotId: null,
+              isTimeslotRow: false,
+              isTimeslotGroupHeader: false,
+              isCrossTenantRow: true,
+              crossTenantWorkplace: wp,
+          });
+      }
+
       // Für statische Sections: Einfache String-zu-Objekt Konvertierung
       const staticRowsToObjects = (rows) => rows.map(name => ({ 
           name, displayName: name, timeslotId: null, isTimeslotRow: false 
@@ -1261,7 +1297,7 @@ export default function ScheduleBoard() {
       }
 
       return result;
-  }, [workplaces, workplaceTimeslots, allShifts, previewShifts, getSectionOrder, systemSettings]);
+  }, [workplaces, workplaceTimeslots, allShifts, previewShifts, getSectionOrder, systemSettings, crossTenantWorkplaces]);
 
     const availableSectionTabs = useMemo(() => {
         const knownTitles = new Set(allSections.map(s => s.title));
@@ -3775,6 +3811,49 @@ export default function ScheduleBoard() {
         return null;
     }, [getDoctorDayWishes, workplaces]);
 
+    // Renders the cell content for a cross-tenant (group/pool) workplace row.
+    // The row itself is NOT a drop target; the user clicks to open the
+    // PoolShiftEditDialog. Existing shifts are rendered as simple chips.
+    const renderCrossTenantCell = (workplace, dateStr) => {
+        const shifts = crossTenantShiftsByCell.get(`${workplace.id}|${dateStr}`) || [];
+        const canWrite = !isReadOnly && (workplace.canWrite !== false);
+        return (
+            <div
+                className={`min-h-[40px] p-1 flex flex-wrap gap-1 transition-colors ${canWrite ? 'cursor-pointer hover:bg-indigo-50/40' : ''}`}
+                onClick={(e) => {
+                    if (!canWrite) return;
+                    // Only open "create" when clicking empty area
+                    if (e.target === e.currentTarget) {
+                        openPoolEditDialog(workplace, dateStr, null);
+                    }
+                }}
+            >
+                {shifts.map((shift) => (
+                    <button
+                        key={shift.id}
+                        type="button"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            if (canWrite) openPoolEditDialog(workplace, dateStr, shift);
+                        }}
+                        className={`text-[10px] px-1.5 py-0.5 rounded border shadow-sm max-w-[140px] truncate ${shift.belongs_to_active_tenant ? 'bg-indigo-100 border-indigo-200 text-indigo-800' : 'bg-slate-100 border-slate-200 text-slate-700'}`}
+                        title={`${shift.employee_name} · ${shift.workplace_name}`}
+                        disabled={!canWrite}
+                    >
+                        {shift.employee_name}
+                    </button>
+                ))}
+                {canWrite && shifts.length === 0 && (
+                    <span
+                        className="text-[10px] text-slate-400 inline-flex items-center gap-0.5 pointer-events-none"
+                    >
+                        <Plus className="w-3 h-3" />
+                    </span>
+                )}
+            </div>
+        );
+    };
+
     const renderCellShifts = useMemo(() => (date, rowName, isSectionFullWidth, timeslotId = null, allTimeslotIds = null, singleTimeslotId = null, dragIdPrefix = '', cellWidth = null) => {
     // Wait for color settings to load
     if (isLoadingColors) return null;
@@ -4077,7 +4156,7 @@ export default function ScheduleBoard() {
 
                                   return (
                                       <div key={`split-${sIdx}-${rowDisplayName}-${rowTimeslotId || 'full'}`} className={`grid ${viewMode === 'day' ? 'grid-cols-[200px_1fr]' : 'grid-cols-[200px_repeat(7,1fr)]'} border-b border-slate-200 ${(draggingDoctorId || draggingShiftId) ? '' : 'hover:bg-slate-50/50'} transition-colors group`}>
-                                          <Droppable droppableId={headerDroppableId} isDropDisabled={isReadOnly}>
+                                          <Droppable droppableId={headerDroppableId} isDropDisabled={isReadOnly || rowObj.isCrossTenantRow}>
                                               {(provided, snapshot) => (
                                                   <div
                                                       ref={provided.innerRef}
@@ -4095,6 +4174,7 @@ export default function ScheduleBoard() {
                                                               )}
                                                               {rowObj.isTimeslotRow && !rowObj.isUnassignedRow && <span className="text-slate-400 mr-1">↳</span>}
                                                               {rowObj.isUnassignedRow && <span className="text-amber-500 mr-1">⚠</span>}
+                                                              {rowObj.isCrossTenantRow && <Globe2 className="w-3 h-3 mr-1 text-indigo-500" />}
                                                               <span
                                                                   className={`${rowLabelPresentation.className} ${rowObj.isUnassignedRow ? 'text-amber-700' : ''}`}
                                                                   style={rowLabelPresentation.style}
@@ -4154,7 +4234,9 @@ export default function ScheduleBoard() {
 
                                               return (
                                                   <div key={`split-cell-${dIdx}`} className="border-r border-slate-100 last:border-r-0">
-                                                      {rowName === 'Verfügbar' ? (
+                                                      {rowObj.isCrossTenantRow ? (
+                                                          renderCrossTenantCell(rowObj.crossTenantWorkplace, dateStr)
+                                                      ) : rowName === 'Verfügbar' ? (
                                                           <Droppable droppableId={withPanelPrefix(`available__${dateStr}`, SPLIT_PANEL_PREFIX)} isDropDisabled={isReadOnly}>
                                                               {(provided, snapshot) => {
                                                                   const assignedDocIds = availabilityBlockingDoctorIdsByDate.get(dateStr) || new Set();
@@ -4900,7 +4982,7 @@ export default function ScheduleBoard() {
                         
                         return (
                         <div key={`${sIdx}-${rowDisplayName}-${rowTimeslotId || 'full'}`} className={`grid border-b border-slate-200 ${(draggingDoctorId || draggingShiftId) ? '' : 'hover:bg-slate-50/50'} transition-colors group`} style={matrixGridStyle}>
-                            <Droppable droppableId={headerDroppableId} isDropDisabled={isReadOnly}>
+                            <Droppable droppableId={headerDroppableId} isDropDisabled={isReadOnly || rowObj.isCrossTenantRow}>
                                 {(provided, snapshot) => (
                                     <div 
                                         ref={provided.innerRef}
@@ -4919,6 +5001,7 @@ export default function ScheduleBoard() {
                                                 )}
                                                 {rowObj.isTimeslotRow && !rowObj.isUnassignedRow && <span className="text-slate-400 mr-1">↳</span>}
                                                 {rowObj.isUnassignedRow && <span className="text-amber-500 mr-1">⚠</span>}
+                                                {rowObj.isCrossTenantRow && <Globe2 className="w-3 h-3 mr-1 text-indigo-500" />}
                                                 <span
                                                     className={`${rowLabelPresentation.className} ${rowObj.isUnassignedRow ? 'text-amber-700' : ''}`}
                                                     style={rowLabelPresentation.style}
@@ -5027,7 +5110,9 @@ export default function ScheduleBoard() {
 
                                 return (
                                     <div key={dIdx} className={`border-r border-slate-100 last:border-r-0`}>
-                                        {rowName === 'Verfügbar' ? (
+                                        {rowObj.isCrossTenantRow ? (
+                                            renderCrossTenantCell(rowObj.crossTenantWorkplace, dateStr)
+                                        ) : rowName === 'Verfügbar' ? (
                                             <Droppable droppableId={`available__${dateStr}`} isDropDisabled={isReadOnly}>
                                                 {(provided, snapshot) => {
                                                     // Calculate available doctors
@@ -5217,6 +5302,15 @@ export default function ScheduleBoard() {
           </div>
         </>
       )}
+
+      {/* Cross-tenant (group/pool) shift editor */}
+      <PoolShiftEditDialog
+        open={poolEditDialog.open}
+        onOpenChange={(open) => setPoolEditDialog((prev) => ({ ...prev, open }))}
+        workplace={poolEditDialog.workplace}
+        date={poolEditDialog.date}
+        shift={poolEditDialog.shift}
+      />
     </div>
   );
 }
