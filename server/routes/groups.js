@@ -349,7 +349,7 @@ router.post('/:groupId/workplaces', async (req, res) => {
     if (!ctx) return;
     requireGroupWriteAccess(ctx, req.params.groupId);
     const {
-      name, category, start_time, end_time,
+      name, start_time, end_time,
       active_days, allows_multiple, min_staff, optimal_staff, default_overlap_tolerance_minutes,
       work_time_percentage, service_type, auto_off, allows_rotation_concurrently,
       affects_availability, allows_absence_overlap, timeslots_enabled,
@@ -365,7 +365,7 @@ router.post('/:groupId/workplaces', async (req, res) => {
           allows_absence_overlap, timeslots_enabled, consecutive_days_mode, constraints_json, created_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        id, Number(req.params.groupId), name, category || null,
+        id, Number(req.params.groupId), name, 'Dienste',
         start_time || null, end_time || null,
         Array.isArray(active_days) ? JSON.stringify(active_days) : null,
         typeof allows_multiple === 'boolean' ? (allows_multiple ? 1 : 0) : 0,
@@ -395,7 +395,7 @@ router.patch('/:groupId/workplaces/:workplaceId', async (req, res) => {
     const ctx = await loadCtx(req, res);
     if (!ctx) return;
     requireGroupWriteAccess(ctx, req.params.groupId);
-    const allowed = ['name', 'category', 'start_time', 'end_time',
+    const allowed = ['name', 'start_time', 'end_time',
       'active_days', 'allows_multiple', 'min_staff', 'optimal_staff', 'default_overlap_tolerance_minutes',
       'work_time_percentage', 'service_type', 'auto_off', 'allows_rotation_concurrently',
       'affects_availability', 'allows_absence_overlap', 'timeslots_enabled',

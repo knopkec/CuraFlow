@@ -90,15 +90,12 @@ describe('TenantGroupManagement', () => {
 
     await user.click(screen.getByTestId('admin-group-workplace-create-button'));
     await user.type(screen.getByTestId('admin-group-workplace-name-input'), 'Interner Hintergrunddienst');
-    await user.type(screen.getByLabelText('Kategorie'), 'Bereitschaft');
+  expect(screen.queryByLabelText('Kategorie')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('Mindestbesetzung')).not.toBeInTheDocument();
     await user.click(screen.getByTestId('admin-group-workplace-service-type'));
     await user.click(await screen.findByRole('option', { name: /Rufbereitschaftsdienst/i }));
     await user.click(screen.getByTestId('admin-group-workplace-auto-off'));
     await user.click(screen.getByTestId('admin-group-workplace-day-6'));
-    await user.clear(screen.getByLabelText('Mindestbesetzung'));
-    await user.type(screen.getByLabelText('Mindestbesetzung'), '2');
-    await user.clear(screen.getByLabelText('Soll-Besetzung'));
-    await user.type(screen.getByLabelText('Soll-Besetzung'), '3');
     await user.clear(screen.getByLabelText(/Pause \/ Toleranz/));
     await user.type(screen.getByLabelText(/Pause \/ Toleranz/), '20');
     await user.clear(screen.getByLabelText(/Arbeitszeit-Anteil/));
@@ -108,7 +105,7 @@ describe('TenantGroupManagement', () => {
     await waitFor(() => {
       expect(mocks.createSharedWorkplace).toHaveBeenCalledWith(1, {
         name: 'Interner Hintergrunddienst',
-        category: 'Bereitschaft',
+        category: 'Dienste',
         start_time: null,
         end_time: null,
         active_days: [1, 2, 3, 4, 5, 6],
@@ -118,8 +115,6 @@ describe('TenantGroupManagement', () => {
         allows_absence_overlap: false,
         consecutive_days_mode: 'allowed',
         allows_multiple: false,
-        min_staff: 2,
-        optimal_staff: 3,
         default_overlap_tolerance_minutes: 20,
         work_time_percentage: 70,
         affects_availability: true,
