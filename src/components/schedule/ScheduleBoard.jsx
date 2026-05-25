@@ -19,7 +19,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { db, api } from "@/api/client";
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useAuth } from '@/components/AuthProvider';
 import DraggableDoctor from './DraggableDoctor';
 import DraggableShift from './DraggableShift';
@@ -969,6 +969,10 @@ export default function ScheduleBoard() {
         queryFn: () => api.getVisiblePoolShifts({ from: fetchRange.start, to: fetchRange.end }),
         staleTime: 30 * 1000,
         refetchOnWindowFocus: false,
+        // Keep prior data visible while a new fetch (e.g. after view switch) is in-flight.
+        // Without this the cross-tenant rows would disappear on every key change because
+        // React Query v5 no longer honours the legacy `keepPreviousData: true` option.
+        placeholderData: keepPreviousData,
     });
 
     const visiblePoolShifts = visiblePoolData?.shifts || [];
