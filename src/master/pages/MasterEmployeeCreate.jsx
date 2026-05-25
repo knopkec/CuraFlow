@@ -15,6 +15,8 @@ import {
   CalendarDays, Clock,
 } from 'lucide-react';
 
+const NO_WORK_TIME_MODEL_VALUE = '__none__';
+
 export default function MasterEmployeeCreate() {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -64,6 +66,9 @@ export default function MasterEmployeeCreate() {
       return;
     }
     const payload = { ...form };
+    if (!payload.work_time_model_id) {
+      payload.work_time_model_id = null;
+    }
     if (payload.target_hours_per_week !== '') {
       payload.target_hours_per_week = parseFloat(payload.target_hours_per_week);
     }
@@ -140,12 +145,15 @@ export default function MasterEmployeeCreate() {
             </div>
             <div>
               <Label className="text-xs text-slate-500 mb-1 block">Arbeitszeitmodell</Label>
-              <Select value={form.work_time_model_id} onValueChange={(v) => updateField('work_time_model_id', v)}>
+              <Select
+                value={form.work_time_model_id || NO_WORK_TIME_MODEL_VALUE}
+                onValueChange={(value) => updateField('work_time_model_id', value === NO_WORK_TIME_MODEL_VALUE ? '' : value)}
+              >
                 <SelectTrigger><SelectValue placeholder="Modell wählen…" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Kein Modell</SelectItem>
+                  <SelectItem value={NO_WORK_TIME_MODEL_VALUE}>Kein Modell</SelectItem>
                   {models.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
+                    <SelectItem key={m.id} value={String(m.id)}>
                       {m.name} ({m.hours_per_week}h/W)
                     </SelectItem>
                   ))}

@@ -77,11 +77,13 @@ export async function ensureTenantBaseTables(tenantPool) {
       is_active TINYINT(1) DEFAULT 1,
       exclude_from_staffing_plan TINYINT(1) DEFAULT 0,
       receive_email_notifications TINYINT(1) DEFAULT 1,
+      central_employee_id VARCHAR(36) DEFAULT NULL,
       work_time_model_id VARCHAR(36) DEFAULT NULL,
       target_weekly_hours DECIMAL(4,1) DEFAULT NULL,
       created_date DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
       updated_date DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-      created_by VARCHAR(255) DEFAULT 'seed'
+      created_by VARCHAR(255) DEFAULT 'seed',
+      INDEX idx_doctor_central_employee (central_employee_id)
     ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
     `CREATE TABLE IF NOT EXISTS Workplace (
       id VARCHAR(36) PRIMARY KEY,

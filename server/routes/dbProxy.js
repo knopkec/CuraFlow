@@ -255,6 +255,18 @@ const ensureTenantBaseSchema = async (dbPool, cacheKey) => {
 
   try {
     await ensureTenantBaseTables(dbPool);
+    const doctorChanged = await ensureColumns(dbPool, 'Doctor', [
+      ['central_employee_id', 'VARCHAR(36) DEFAULT NULL'],
+    ]);
+    if (doctorChanged) {
+      try {
+        await dbPool.execute('CREATE INDEX idx_doctor_central_employee ON Doctor(central_employee_id)');
+      } catch (err) {
+        if (err.code !== 'ER_DUP_KEYNAME') {
+          console.warn('[dbProxy] ensureTenantBaseSchema doctor link index:', err.message);
+        }
+      }
+    }
     clearColumnsCache(TENANT_BASE_TABLES, cacheKey);
   } catch (err) {
     console.error('Failed to ensure tenant base schema:', err.message);

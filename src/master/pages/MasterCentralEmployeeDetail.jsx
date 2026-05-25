@@ -19,7 +19,7 @@ import {
   ArrowLeft, Building2, User, FileText, Clock, CalendarDays,
   TrendingUp, TrendingDown, Minus, Save, Pencil, AlertCircle,
   Briefcase, Hash, Mail, Phone, MapPin,
-  Loader2, UserCheck, UserX, Link2, RefreshCw,
+  Loader2, UserCheck, UserX, Link2, RefreshCw, Trash2,
 } from 'lucide-react';
 
 export default function MasterCentralEmployeeDetail() {
@@ -116,8 +116,47 @@ export default function MasterCentralEmployeeDetail() {
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: () => api.request(`/api/master/employees/${employeeId}`, {
+      method: 'DELETE',
+    }),
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ['master-central-employees'] });
+      await queryClient.removeQueries({ queryKey: ['master-central-employee', employeeId] });
+      toast({
+        title: 'Gelöscht',
+        description: result?.message || 'Mitarbeiter wurde permanent gelöscht.',
+      });
+      navigate('/mitarbeiter');
+    },
+    onError: (err) => {
+      toast({
+        title: 'Fehler',
+        description: err.message || 'Mitarbeiter konnte nicht gelöscht werden.',
+        variant: 'destructive',
+      });
+    },
+  });
+
   const updateField = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleDelete = () => {
+    if (employee?.is_active) {
+      toast({
+        title: 'Löschen nicht möglich',
+        description: 'Bitte den Mitarbeiter zuerst deaktivieren und speichern.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!window.confirm(`"${displayName}" endgültig löschen?\n\nDies entfernt den Eintrag aus der zentralen Verwaltung und löst alle Mandanten-Verknüpfungen.`)) {
+      return;
+    }
+
+    deleteMutation.mutate();
   };
 
   if (isLoading) {
@@ -184,6 +223,16 @@ export default function MasterCentralEmployeeDetail() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant={employee.is_active ? 'outline' : 'destructive'}
+            size="sm"
+            disabled={deleteMutation.isPending || employee.is_active}
+            title={employee.is_active ? 'Zum Löschen zuerst deaktivieren und speichern.' : 'Mitarbeiter endgültig löschen'}
+            onClick={handleDelete}
+          >
+            {deleteMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Trash2 className="w-4 h-4 mr-2" />}
+            Löschen
+          </Button>
           {editMode ? (
             <>
               <Button variant="outline" size="sm" onClick={() => { setEditMode(false); setForm({...form}); }}>

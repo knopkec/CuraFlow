@@ -506,20 +506,20 @@ export default function MasterEmployeeList() {
                         </span>
                       </TableCell>
                       <TableCell>
-                        {!emp.is_active ? (
+                        <div className="flex items-center justify-end gap-1">
                           <Button
                             size="sm"
                             variant="ghost"
                             className="text-red-500 hover:text-red-700 hover:bg-red-50 text-xs px-2"
-                            disabled={deleteMutation.isPending}
+                            disabled={deleteMutation.isPending || emp.is_active}
+                            title={emp.is_active ? 'Zum Löschen zuerst deaktivieren und speichern.' : 'Mitarbeiter endgültig löschen'}
                             onClick={(e) => handleDelete(emp, e)}
                           >
                             <Trash2 className="w-3.5 h-3.5 mr-1" />
                             Löschen
                           </Button>
-                        ) : (
                           <ChevronRight className="w-4 h-4 text-slate-300" />
-                        )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
