@@ -25,8 +25,6 @@ const DEFAULT_GROUP_FORM = {
 
 const DEFAULT_WORKPLACE_FORM = {
     name: '',
-    start_time: '',
-    end_time: '',
     active_days: [1, 2, 3, 4, 5],
     service_type: '1',
     auto_off: false,
@@ -63,10 +61,6 @@ function normalizeWorkplace(workplace) {
         is_active: Boolean(workplace.is_active),
         active_days: Array.isArray(workplace.active_days) ? workplace.active_days : [1, 2, 3, 4, 5],
     };
-}
-
-function toTimeField(value) {
-    return typeof value === 'string' ? value.slice(0, 5) : '';
 }
 
 function serviceTypeLabel(value) {
@@ -308,8 +302,6 @@ export default function TenantGroupManagement() {
         setEditingWorkplace(workplace);
         setWorkplaceForm({
             name: workplace.name || '',
-            start_time: toTimeField(workplace.start_time),
-            end_time: toTimeField(workplace.end_time),
             active_days: Array.isArray(workplace.active_days) ? workplace.active_days : [1, 2, 3, 4, 5],
             service_type: workplace.service_type ? String(workplace.service_type) : '1',
             auto_off: Boolean(workplace.auto_off),
@@ -332,8 +324,8 @@ export default function TenantGroupManagement() {
         const payload = {
             name: workplaceForm.name.trim(),
             category: 'Dienste',
-            start_time: workplaceForm.start_time || null,
-            end_time: workplaceForm.end_time || null,
+            start_time: null,
+            end_time: null,
             active_days: Array.isArray(workplaceForm.active_days) ? workplaceForm.active_days : [1, 2, 3, 4, 5],
             service_type: Number.parseInt(workplaceForm.service_type, 10) || null,
             auto_off: Boolean(workplaceForm.auto_off),
@@ -587,7 +579,6 @@ export default function TenantGroupManagement() {
                                     <TableHeader>
                                         <TableRow>
                                             <TableHead>Name</TableHead>
-                                            <TableHead>Zeit</TableHead>
                                             <TableHead>Status</TableHead>
                                             <TableHead className="text-right">Aktionen</TableHead>
                                         </TableRow>
@@ -610,9 +601,6 @@ export default function TenantGroupManagement() {
                                                             </Badge>
                                                         ) : null}
                                                     </div>
-                                                </TableCell>
-                                                <TableCell className="text-slate-500">
-                                                    {workplace.start_time && workplace.end_time ? `${toTimeField(workplace.start_time)}–${toTimeField(workplace.end_time)}` : 'Offen'}
                                                 </TableCell>
                                                 <TableCell>
                                                     <div className="flex flex-col gap-1">
@@ -726,27 +714,6 @@ export default function TenantGroupManagement() {
                                     ))}
                                 </SelectContent>
                             </Select>
-                        </div>
-
-                        <div className="grid gap-4 md:grid-cols-2">
-                            <div className="space-y-2">
-                                <Label htmlFor="workplace-start">Beginn</Label>
-                                <Input
-                                    id="workplace-start"
-                                    type="time"
-                                    value={workplaceForm.start_time}
-                                    onChange={(event) => setWorkplaceForm((current) => ({ ...current, start_time: event.target.value }))}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="workplace-end">Ende</Label>
-                                <Input
-                                    id="workplace-end"
-                                    type="time"
-                                    value={workplaceForm.end_time}
-                                    onChange={(event) => setWorkplaceForm((current) => ({ ...current, end_time: event.target.value }))}
-                                />
-                            </div>
                         </div>
 
                         <div className="flex items-center justify-between rounded-lg border bg-slate-50 p-3">

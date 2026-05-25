@@ -90,8 +90,10 @@ describe('TenantGroupManagement', () => {
 
     await user.click(screen.getByTestId('admin-group-workplace-create-button'));
     await user.type(screen.getByTestId('admin-group-workplace-name-input'), 'Interner Hintergrunddienst');
-  expect(screen.queryByLabelText('Kategorie')).not.toBeInTheDocument();
-  expect(screen.queryByLabelText('Mindestbesetzung')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Kategorie')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Beginn')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Ende')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Mindestbesetzung')).not.toBeInTheDocument();
     await user.click(screen.getByTestId('admin-group-workplace-service-type'));
     await user.click(await screen.findByRole('option', { name: /Rufbereitschaftsdienst/i }));
     await user.click(screen.getByTestId('admin-group-workplace-auto-off'));
