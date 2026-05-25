@@ -749,7 +749,7 @@ router.post('/:groupId/shifts', async (req, res) => {
       `INSERT INTO shared_shift_entry
          (id, shared_workplace_id, date, employee_id, billing_tenant_id, start_time, end_time, note, created_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, shared_workplace_id, date, employee_id, Number(billing_tenant_id),
+      [id, shared_workplace_id, date, employee_id, String(billing_tenant_id),
        start_time || null, end_time || null, note || null,
        req.user.email || req.user.sub]
     );
@@ -769,8 +769,12 @@ router.patch('/:groupId/shifts/:shiftId', async (req, res) => {
     const values = [];
     for (const key of allowed) {
       if (req.body[key] === undefined) continue;
+      let value = req.body[key];
+      if (key === 'billing_tenant_id' && value != null) {
+        value = String(value);
+      }
       fields.push(`${key} = ?`);
-      values.push(req.body[key]);
+      values.push(value);
     }
     if (fields.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
 

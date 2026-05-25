@@ -21,6 +21,16 @@ export async function runMasterMigrations(dbPool) {
     return true;
   };
 
+  const getColumnInfo = async (tableName, columnName) => {
+    const [rows] = await dbPool.execute(
+      `SELECT COLUMN_TYPE, CHARACTER_SET_NAME, COLLATION_NAME
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+      [tableName, columnName]
+    );
+    return rows[0] || null;
+  };
+
   const run = async (migration, execute, options = {}) => {
     const {
       duplicateCodes = [],
@@ -480,6 +490,28 @@ export async function runMasterMigrations(dbPool) {
       ) ${fkTableSuffix}
     `);
   }, { duplicateCodes: ['ER_TABLE_EXISTS_ERROR'], duplicateReason: 'Tabelle bereits vorhanden' });
+
+  await run('align_shared_shift_entry_billing_tenant_id', async () => {
+    const sourceColumn = await getColumnInfo('db_tokens', 'id');
+    const targetColumn = await getColumnInfo('shared_shift_entry', 'billing_tenant_id');
+    if (!sourceColumn || !targetColumn) {
+      return SKIPPED;
+    }
+
+    const sameType = sourceColumn.COLUMN_TYPE === targetColumn.COLUMN_TYPE;
+    const sameCharset = (sourceColumn.CHARACTER_SET_NAME || null) === (targetColumn.CHARACTER_SET_NAME || null);
+    const sameCollation = (sourceColumn.COLLATION_NAME || null) === (targetColumn.COLLATION_NAME || null);
+    if (sameType && sameCharset && sameCollation) {
+      return SKIPPED;
+    }
+
+    const charsetSql = sourceColumn.CHARACTER_SET_NAME ? ` CHARACTER SET ${sourceColumn.CHARACTER_SET_NAME}` : '';
+    const collationSql = sourceColumn.COLLATION_NAME ? ` COLLATE ${sourceColumn.COLLATION_NAME}` : '';
+    await dbPool.execute(
+      `ALTER TABLE \`shared_shift_entry\` MODIFY COLUMN \`billing_tenant_id\` ${sourceColumn.COLUMN_TYPE}${charsetSql}${collationSql} NOT NULL`
+    );
+    return true;
+  }, { skippedReason: 'Spaltentyp bereits kompatibel' });
 
   await run('create_shared_workplace_quota_table', async () => {
     await dbPool.execute(`

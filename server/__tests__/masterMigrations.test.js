@@ -10,6 +10,23 @@ function createMockDbPool() {
       calls.push({ sql, params });
 
       if (sql.includes('FROM information_schema.COLUMNS')) {
+        if (sql.includes('COLUMN_TYPE, CHARACTER_SET_NAME, COLLATION_NAME')) {
+          if (params[0] === 'db_tokens' && params[1] === 'id') {
+            return [[{
+              COLUMN_TYPE: 'VARCHAR(64)',
+              CHARACTER_SET_NAME: 'utf8mb4',
+              COLLATION_NAME: 'utf8mb4_0900_ai_ci',
+            }]];
+          }
+          if (params[0] === 'shared_shift_entry' && params[1] === 'billing_tenant_id') {
+            return [[{
+              COLUMN_TYPE: 'VARCHAR(36)',
+              CHARACTER_SET_NAME: 'utf8mb4',
+              COLLATION_NAME: 'utf8mb4_unicode_ci',
+            }]];
+          }
+          return [[null]];
+        }
         return [[{ cnt: 0 }]];
       }
 
@@ -174,5 +191,26 @@ describe('runMasterMigrations', () => {
       sql.includes('ALTER TABLE `app_users` ADD COLUMN `group_admin_groups`')
     );
     expect(adminGroupsAlter).toBeDefined();
+  });
+
+  it('aligns shared_shift_entry.billing_tenant_id to db_tokens.id metadata', async () => {
+    const dbPool = createMockDbPool();
+
+    await runMasterMigrations(dbPool);
+
+    const metadataReads = dbPool.calls.filter(
+      ({ sql, params }) =>
+        sql.includes('COLUMN_TYPE, CHARACTER_SET_NAME, COLLATION_NAME')
+        && (
+          (params[0] === 'db_tokens' && params[1] === 'id')
+          || (params[0] === 'shared_shift_entry' && params[1] === 'billing_tenant_id')
+        )
+    );
+    expect(metadataReads).toHaveLength(2);
+
+    const modifyCall = dbPool.calls.find(({ sql }) =>
+      sql.includes('ALTER TABLE `shared_shift_entry` MODIFY COLUMN `billing_tenant_id` VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL')
+    );
+    expect(modifyCall).toBeDefined();
   });
 });
