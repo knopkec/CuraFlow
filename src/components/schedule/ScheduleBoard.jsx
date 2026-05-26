@@ -86,7 +86,7 @@ const SECTION_TABS_KEY = 'schedule_section_tabs';
 const PINNED_SECTION_TITLE = 'Anwesenheiten';
 const SPLIT_PANEL_PREFIX = 'split::';
 const SPLIT_DRAG_PREFIX = 'split-';
-const STICKY_AVAILABLE_ROW_CLASS = 'sticky z-20 shadow-sm';
+const STICKY_AVAILABLE_SECTION_CLASS = 'sticky z-20 shadow-sm';
 
 const withPanelPrefix = (id, prefix = '') => `${prefix}${id}`;
 const stripPanelPrefix = (id = '') => (id.startsWith(SPLIT_PANEL_PREFIX) ? id.slice(SPLIT_PANEL_PREFIX.length) : id);
@@ -2330,7 +2330,7 @@ export default function ScheduleBoard() {
             : `${rowLabelWidth}px repeat(${weekDays.length}, minmax(${isMonthView ? 38 : 0}px, 1fr))`
     }), [viewMode, rowLabelWidth, weekDays.length, isMonthView]);
 
-    const stickyAvailableRowStyle = useMemo(() => ({
+    const stickyAvailableSectionStyle = useMemo(() => ({
         bottom: 0,
     }), []);
 
@@ -4236,9 +4236,10 @@ export default function ScheduleBoard() {
 
                       const isCollapsed = collapsedSections.includes(section.title);
                       const customStyle = getSectionStyle(section.title);
+                      const isPinnedSection = section.title === PINNED_SECTION_TITLE;
 
                       return (
-                          <div key={`split-section-${sIdx}`}>
+                          <div key={`split-section-${sIdx}`} className={isPinnedSection ? STICKY_AVAILABLE_SECTION_CLASS : ''} style={isPinnedSection ? stickyAvailableSectionStyle : undefined}>
                               <div
                                   className={`px-3 py-2 text-xs font-bold uppercase tracking-wider border-b border-slate-200 flex items-center justify-between cursor-pointer select-none transition-colors ${!customStyle ? section.headerColor : ''}`}
                                   style={customStyle ? customStyle.header : {}}
@@ -4259,7 +4260,6 @@ export default function ScheduleBoard() {
                                   const isGroupCollapsed = collapsedTimeslotGroups.includes(rowName);
                                   const rowStyle = getRowStyle(rowName, customStyle);
                                   const useLightweightTimeslotTarget = isAvailableTimeslotMeasurementMode && rowObj.isTimeslotRow && !rowObj.isUnassignedRow;
-                                  const isAvailableRow = rowName === 'Verfügbar';
 
                                   const rawHeaderDroppableId = isGroupHeader
                                       ? `rowHeader__${rowName}__allTimeslots__`
@@ -4268,7 +4268,7 @@ export default function ScheduleBoard() {
                                   const rowLabelPresentation = getRowLabelPresentation(rowDisplayName, isMonthView);
 
                                   return (
-                                      <div key={`split-${sIdx}-${rowDisplayName}-${rowTimeslotId || 'full'}`} className={`grid ${viewMode === 'day' ? 'grid-cols-[200px_1fr]' : 'grid-cols-[200px_repeat(7,1fr)]'} border-b border-slate-200 ${(draggingDoctorId || draggingShiftId) ? '' : 'hover:bg-slate-50/50'} transition-colors group ${isAvailableRow ? STICKY_AVAILABLE_ROW_CLASS : ''}`} style={isAvailableRow ? stickyAvailableRowStyle : undefined}>
+                                      <div key={`split-${sIdx}-${rowDisplayName}-${rowTimeslotId || 'full'}`} className={`grid ${viewMode === 'day' ? 'grid-cols-[200px_1fr]' : 'grid-cols-[200px_repeat(7,1fr)]'} border-b border-slate-200 ${(draggingDoctorId || draggingShiftId) ? '' : 'hover:bg-slate-50/50'} transition-colors group`}>
                                           <Droppable droppableId={headerDroppableId} isDropDisabled={isReadOnly || rowObj.isCrossTenantRow}>
                                               {(provided, snapshot) => (
                                                   <div
@@ -5040,9 +5040,10 @@ export default function ScheduleBoard() {
                 
                 const isCollapsed = collapsedSections.includes(section.title);
                 const customStyle = getSectionStyle(section.title);
+                const isPinnedSection = section.title === PINNED_SECTION_TITLE;
 
                 return (
-                <div key={sIdx}>
+                <div key={sIdx} className={isPinnedSection ? STICKY_AVAILABLE_SECTION_CLASS : ''} style={isPinnedSection ? stickyAvailableSectionStyle : undefined}>
                     <div 
                         className={`px-3 py-2 text-xs font-bold uppercase tracking-wider border-b border-slate-200 flex items-center justify-between cursor-pointer select-none transition-colors ${!customStyle ? section.headerColor : ''}`}
                         style={customStyle ? customStyle.header : {}}
@@ -5080,7 +5081,6 @@ export default function ScheduleBoard() {
                         const rowStyle = getRowStyle(rowName, customStyle);
                         const rowWorkplace = workplaceByName.get(rowName);
                         const useLightweightTimeslotTarget = isAvailableTimeslotMeasurementMode && rowObj.isTimeslotRow && !rowObj.isUnassignedRow;
-                        const isAvailableRow = rowName === 'Verfügbar';
                         const expandedRowLabel = getExpandedTimeslotRowLabel(rowObj, rowDisplayName);
                         const rowLabelPresentation = getRowLabelPresentation(expandedRowLabel, isMonthView);
                         
@@ -5090,7 +5090,7 @@ export default function ScheduleBoard() {
                             : `rowHeader__${rowName}${rowTimeslotId ? '__' + rowTimeslotId : ''}`;
                         
                         return (
-                        <div key={`${sIdx}-${rowDisplayName}-${rowTimeslotId || 'full'}`} className={`grid border-b border-slate-200 ${(draggingDoctorId || draggingShiftId) ? '' : 'hover:bg-slate-50/50'} transition-colors group ${isAvailableRow ? STICKY_AVAILABLE_ROW_CLASS : ''}`} style={isAvailableRow ? { ...matrixGridStyle, ...stickyAvailableRowStyle } : matrixGridStyle}>
+                        <div key={`${sIdx}-${rowDisplayName}-${rowTimeslotId || 'full'}`} className={`grid border-b border-slate-200 ${(draggingDoctorId || draggingShiftId) ? '' : 'hover:bg-slate-50/50'} transition-colors group`} style={matrixGridStyle}>
                             <Droppable droppableId={headerDroppableId} isDropDisabled={isReadOnly || rowObj.isCrossTenantRow}>
                                 {(provided, snapshot) => (
                                     <div 
