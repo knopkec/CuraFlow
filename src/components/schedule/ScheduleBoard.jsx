@@ -86,7 +86,7 @@ const SECTION_TABS_KEY = 'schedule_section_tabs';
 const PINNED_SECTION_TITLE = 'Anwesenheiten';
 const SPLIT_PANEL_PREFIX = 'split::';
 const SPLIT_DRAG_PREFIX = 'split-';
-const STICKY_AVAILABLE_SECTION_CLASS = 'sticky z-20 shadow-sm';
+const STICKY_AVAILABLE_SECTION_CLASS = 'sticky z-20 bg-white shadow-sm';
 
 const withPanelPrefix = (id, prefix = '') => `${prefix}${id}`;
 const stripPanelPrefix = (id = '') => (id.startsWith(SPLIT_PANEL_PREFIX) ? id.slice(SPLIT_PANEL_PREFIX.length) : id);
@@ -820,9 +820,9 @@ export default function ScheduleBoard() {
     const savedCollapsedGroupsRef = useRef(null);
   const droppedInTimeslotGroupRef = useRef(null);
     const dragAutoScrollerOptions = useMemo(() => ({
-            startFromPercentage: 0.3,
-            maxScrollAtPercentage: 0.1,
-            maxPixelScroll: 36,
+        startFromPercentage: 0.12,
+        maxScrollAtPercentage: 0.04,
+        maxPixelScroll: 30,
             ease: (value) => value,
     }), []);
 
@@ -4361,7 +4361,7 @@ export default function ScheduleBoard() {
                                                                       <div
                                                                           ref={provided.innerRef}
                                                                           {...provided.droppableProps}
-                                                                          className={`min-h-[40px] p-1 flex flex-wrap gap-1 transition-colors ${snapshot.isDraggingOver ? 'bg-green-100' : 'bg-green-50/30'}`}
+                                                                          className={`min-h-[40px] p-1 flex flex-wrap gap-1 transition-colors ${snapshot.isDraggingOver ? 'bg-green-100' : 'bg-green-50'}`}
                                                                       >
                                                                           {availableDocs.map((doc, idx) => (
                                                                               <Draggable key={`split-available-${doc.id}-${dateStr}`} draggableId={`${SPLIT_DRAG_PREFIX}available-doc-${doc.id}-${dateStr}`} index={idx} isDragDisabled={isReadOnly}>
@@ -5232,7 +5232,7 @@ export default function ScheduleBoard() {
                                                         <div
                                                             ref={provided.innerRef}
                                                             {...provided.droppableProps}
-                                                            className={`${isMonthView ? 'min-h-[32px] p-0.5 gap-0.5' : 'min-h-[40px] p-1 gap-1'} flex flex-wrap transition-colors ${snapshot.isDraggingOver ? 'bg-green-100' : 'bg-green-50/30'}`}
+                                                            className={`${isMonthView ? 'min-h-[32px] p-0.5 gap-0.5' : 'min-h-[40px] p-1 gap-1'} flex flex-wrap transition-colors ${snapshot.isDraggingOver ? 'bg-green-100' : 'bg-green-50'}`}
                                                         >
                                                             {availableDocs.map((doc, idx) => (
                                                                 <Draggable 
