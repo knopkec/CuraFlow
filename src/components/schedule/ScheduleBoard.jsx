@@ -812,7 +812,7 @@ export default function ScheduleBoard() {
     const dragAutoScrollerOptions = useMemo(() => ({
             startFromPercentage: 0.3,
             maxScrollAtPercentage: 0.1,
-            maxPixelScroll: 16,
+            maxPixelScroll: 36,
             ease: (value) => value,
     }), []);
 
@@ -916,6 +916,7 @@ export default function ScheduleBoard() {
   const [draggingDoctorId, setDraggingDoctorId] = useState(null);
   const [draggingShiftId, setDraggingShiftId] = useState(null);
   const [isDraggingFromGrid, setIsDraggingFromGrid] = useState(false);
+        const [isAvailableTimeslotMeasurementMode, setIsAvailableTimeslotMeasurementMode] = useState(false);
     const [activeSectionTabId, setActiveSectionTabId] = useState(initialState.activeSectionTabId);
     const [isSplitViewEnabled, setIsSplitViewEnabled] = useState(false);
     const [splitSectionTabId, setSplitSectionTabId] = useState('');
@@ -2319,16 +2320,6 @@ export default function ScheduleBoard() {
             : `${rowLabelWidth}px repeat(${weekDays.length}, minmax(${isMonthView ? 38 : 0}px, 1fr))`
     }), [viewMode, rowLabelWidth, weekDays.length, isMonthView]);
 
-    const matrixRowVisibilityStyle = useMemo(() => ({
-        contentVisibility: 'auto',
-        containIntrinsicSize: isMonthView ? '48px' : '72px',
-    }), [isMonthView]);
-
-    const matrixRowStyle = useMemo(() => ({
-        ...matrixGridStyle,
-        ...matrixRowVisibilityStyle,
-    }), [matrixGridStyle, matrixRowVisibilityStyle]);
-
     const matrixMinWidth = useMemo(() => {
         if (viewMode === 'day') return rowLabelWidth + 480;
         return rowLabelWidth + (weekDays.length * (isMonthView ? 38 : 90));
@@ -2597,6 +2588,7 @@ export default function ScheduleBoard() {
     const { draggableId } = before;
         const normalizedDraggableId = normalizeDraggableId(draggableId);
         if (!normalizedDraggableId) return;
+                const isAvailableDoctorDrag = normalizedDraggableId.startsWith('available-doc-');
 
     let docId = null;
     let shiftId = null;
@@ -2621,6 +2613,7 @@ export default function ScheduleBoard() {
       setCollapsedTimeslotGroups(prev => {
         if (prev.length > 0) {
           savedCollapsedGroupsRef.current = prev;
+                    if (isAvailableDoctorDrag) setIsAvailableTimeslotMeasurementMode(true);
           return [];
         }
         return prev;
@@ -2674,6 +2667,7 @@ export default function ScheduleBoard() {
 
   const handleDragEnd = async (result) => {
     setIsDraggingFromGrid(false);
+                setIsAvailableTimeslotMeasurementMode(false);
         // Gespeicherte Collapsed-Gruppen wiederherstellen
         const saved = savedCollapsedGroupsRef.current;
         if (saved) {
@@ -4132,6 +4126,47 @@ export default function ScheduleBoard() {
     );
                                 }, [currentWeekShiftLookup, doctorById, getRoleColor, shiftBoxSize, effectiveGridFontSize, getDoctorChipLabel, lateRotationIndicatorByDoctorDay]);
 
+    const renderAvailableDoctorClone = useMemo(() => (provided, snapshot, rubric) => {
+        const droppableId = stripPanelPrefix(rubric.source.droppableId || '');
+        const dateStr = droppableId.startsWith('available__') ? droppableId.replace('available__', '') : null;
+        const doctor = dateStr ? availableDoctorsByDate.get(dateStr)?.[rubric.source.index] : null;
+        if (!doctor) return null;
+
+        const roleStyle = getRoleColor(doctor.role);
+        const cloneSize = shiftBoxSize;
+
+        return (
+            <div
+                ref={provided.innerRef}
+                {...provided.draggableProps}
+                {...provided.dragHandleProps}
+                className="flex items-center justify-center"
+                style={{
+                    ...provided.draggableProps.style,
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    boxShadow: 'none',
+                    width: `${cloneSize}px`,
+                    height: `${cloneSize}px`,
+                }}
+            >
+                <div
+                    className="relative flex items-center justify-center rounded-md font-bold border shadow-2xl ring-4 ring-indigo-400"
+                    style={{
+                        backgroundColor: roleStyle?.backgroundColor || '#ffffff',
+                        color: roleStyle?.color || '#000000',
+                        width: `${cloneSize}px`,
+                        height: `${cloneSize}px`,
+                        fontSize: `${effectiveGridFontSize}px`,
+                        zIndex: 9999,
+                    }}
+                >
+                    <span>{getDoctorChipLabel(doctor)}</span>
+                </div>
+            </div>
+        );
+    }, [availableDoctorsByDate, effectiveGridFontSize, getDoctorChipLabel, getRoleColor, shiftBoxSize]);
+
   const renderSplitMatrix = () => {
       if (!canUseSplitView || !isSplitViewEnabled || splitSections.length === 0) return null;
 
@@ -4209,6 +4244,7 @@ export default function ScheduleBoard() {
                                   const isGroupHeader = rowObj.isTimeslotGroupHeader;
                                   const isGroupCollapsed = collapsedTimeslotGroups.includes(rowName);
                                   const rowStyle = getRowStyle(rowName, customStyle);
+                                  const useLightweightTimeslotTarget = isAvailableTimeslotMeasurementMode && rowObj.isTimeslotRow && !rowObj.isUnassignedRow;
 
                                   const rawHeaderDroppableId = isGroupHeader
                                       ? `rowHeader__${rowName}__allTimeslots__`
@@ -4217,7 +4253,7 @@ export default function ScheduleBoard() {
                                   const rowLabelPresentation = getRowLabelPresentation(rowDisplayName, isMonthView);
 
                                   return (
-                                      <div key={`split-${sIdx}-${rowDisplayName}-${rowTimeslotId || 'full'}`} className={`grid ${viewMode === 'day' ? 'grid-cols-[200px_1fr]' : 'grid-cols-[200px_repeat(7,1fr)]'} border-b border-slate-200 ${(draggingDoctorId || draggingShiftId) ? '' : 'hover:bg-slate-50/50'} transition-colors group`} style={matrixRowVisibilityStyle}>
+                                      <div key={`split-${sIdx}-${rowDisplayName}-${rowTimeslotId || 'full'}`} className={`grid ${viewMode === 'day' ? 'grid-cols-[200px_1fr]' : 'grid-cols-[200px_repeat(7,1fr)]'} border-b border-slate-200 ${(draggingDoctorId || draggingShiftId) ? '' : 'hover:bg-slate-50/50'} transition-colors group`}>
                                           <Droppable droppableId={headerDroppableId} isDropDisabled={isReadOnly || rowObj.isCrossTenantRow}>
                                               {(provided, snapshot) => (
                                                   <div
@@ -4299,7 +4335,7 @@ export default function ScheduleBoard() {
                                                       {rowObj.isCrossTenantRow ? (
                                                           renderCrossTenantCell(rowObj.crossTenantWorkplace, dateStr)
                                                       ) : rowName === 'Verfügbar' ? (
-                                                          <Droppable droppableId={withPanelPrefix(`available__${dateStr}`, SPLIT_PANEL_PREFIX)} isDropDisabled={isReadOnly}>
+                                                          <Droppable droppableId={withPanelPrefix(`available__${dateStr}`, SPLIT_PANEL_PREFIX)} isDropDisabled={isReadOnly} renderClone={renderAvailableDoctorClone}>
                                                               {(provided, snapshot) => {
                                                                   const assignedDocIds = availabilityBlockingDoctorIdsByDate.get(dateStr) || new Set();
                                                                   const availableDocs = sortDoctorsForDisplay(
@@ -4370,7 +4406,7 @@ export default function ScheduleBoard() {
                                                               baseStyle={rowStyle.backgroundColor ? { backgroundColor: rowStyle.backgroundColor, color: rowStyle.color } : {}}
                                                               renderClone={renderShiftClone}
                                                           >
-                                                              {({ cellWidth }) => renderCellShifts(
+                                                              {({ cellWidth }) => useLightweightTimeslotTarget ? null : renderCellShifts(
                                                                   day,
                                                                   rowName,
                                                                   ['Dienste', 'Demonstrationen & Konsile'].includes(section.title),
@@ -5028,6 +5064,7 @@ export default function ScheduleBoard() {
                         const isGroupCollapsed = collapsedTimeslotGroups.includes(rowName);
                         const rowStyle = getRowStyle(rowName, customStyle);
                         const rowWorkplace = workplaceByName.get(rowName);
+                        const useLightweightTimeslotTarget = isAvailableTimeslotMeasurementMode && rowObj.isTimeslotRow && !rowObj.isUnassignedRow;
                         const expandedRowLabel = getExpandedTimeslotRowLabel(rowObj, rowDisplayName);
                         const rowLabelPresentation = getRowLabelPresentation(expandedRowLabel, isMonthView);
                         
@@ -5037,7 +5074,7 @@ export default function ScheduleBoard() {
                             : `rowHeader__${rowName}${rowTimeslotId ? '__' + rowTimeslotId : ''}`;
                         
                         return (
-                        <div key={`${sIdx}-${rowDisplayName}-${rowTimeslotId || 'full'}`} className={`grid border-b border-slate-200 ${(draggingDoctorId || draggingShiftId) ? '' : 'hover:bg-slate-50/50'} transition-colors group`} style={matrixRowStyle}>
+                        <div key={`${sIdx}-${rowDisplayName}-${rowTimeslotId || 'full'}`} className={`grid border-b border-slate-200 ${(draggingDoctorId || draggingShiftId) ? '' : 'hover:bg-slate-50/50'} transition-colors group`} style={matrixGridStyle}>
                             <Droppable droppableId={headerDroppableId} isDropDisabled={isReadOnly || rowObj.isCrossTenantRow}>
                                 {(provided, snapshot) => (
                                     <div 
@@ -5169,7 +5206,7 @@ export default function ScheduleBoard() {
                                         {rowObj.isCrossTenantRow ? (
                                             renderCrossTenantCell(rowObj.crossTenantWorkplace, dateStr)
                                         ) : rowName === 'Verfügbar' ? (
-                                            <Droppable droppableId={`available__${dateStr}`} isDropDisabled={isReadOnly}>
+                                            <Droppable droppableId={`available__${dateStr}`} isDropDisabled={isReadOnly} renderClone={renderAvailableDoctorClone}>
                                                 {(provided, snapshot) => {
                                                     // Calculate available doctors
                                                     // Filter out doctors who are already assigned to a BLOCKING position
@@ -5269,7 +5306,7 @@ export default function ScheduleBoard() {
                                                 baseStyle={rowStyle.backgroundColor ? { backgroundColor: rowStyle.backgroundColor, color: rowStyle.color } : {}}
                                                 renderClone={renderShiftClone}
                                             >
-                                                {({ cellWidth }) => renderCellShifts(
+                                                {({ cellWidth }) => useLightweightTimeslotTarget ? null : renderCellShifts(
                                                     day, 
                                                     rowName, 
                                                     ["Dienste", "Demonstrationen & Konsile"].includes(section.title), 
