@@ -92,6 +92,15 @@ const withPanelPrefix = (id, prefix = '') => `${prefix}${id}`;
 const stripPanelPrefix = (id = '') => (id.startsWith(SPLIT_PANEL_PREFIX) ? id.slice(SPLIT_PANEL_PREFIX.length) : id);
 const normalizeDraggableId = (id = '') => (id.startsWith(SPLIT_DRAG_PREFIX) ? id.slice(SPLIT_DRAG_PREFIX.length) : id);
 const encodeScheduleTargetId = (value = '') => encodeURIComponent(String(value));
+const movePinnedSectionToEnd = (sections = []) => {
+    const pinnedSections = sections.filter((section) => section.title === PINNED_SECTION_TITLE);
+    if (pinnedSections.length === 0) return sections;
+
+    return [
+        ...sections.filter((section) => section.title !== PINNED_SECTION_TITLE),
+        ...pinnedSections,
+    ];
+};
 const parseAvailableDoctorId = (draggableId = '') => {
     const normalized = normalizeDraggableId(draggableId);
     if (!normalized.startsWith('available-doc-')) return null;
@@ -2322,8 +2331,8 @@ export default function ScheduleBoard() {
     }), [viewMode, rowLabelWidth, weekDays.length, isMonthView]);
 
     const stickyAvailableRowStyle = useMemo(() => ({
-        top: isMonthView ? '42px' : '57px',
-    }), [isMonthView]);
+        bottom: 0,
+    }), []);
 
     const matrixMinWidth = useMemo(() => {
         if (viewMode === 'day') return rowLabelWidth + 480;
@@ -4207,7 +4216,7 @@ export default function ScheduleBoard() {
                       })}
                   </div>
 
-                  {splitSections.map((section, sIdx) => {
+                  {movePinnedSectionToEnd(splitSections).map((section, sIdx) => {
                       const normalizedRows = section.rows.map(r =>
                           typeof r === 'string' ? { name: r, displayName: r, timeslotId: null, isTimeslotRow: false, isTimeslotGroupHeader: false } : r
                       );
@@ -5010,7 +5019,7 @@ export default function ScheduleBoard() {
                 })}
               </div>
 
-              {sections.map((section, sIdx) => {
+              {movePinnedSectionToEnd(sections).map((section, sIdx) => {
                 // rows sind jetzt Objekte mit { name, displayName, timeslotId, isTimeslotRow, isTimeslotGroupHeader }
                 // Für Rückwärtskompatibilität: Falls string, in Objekt konvertieren
                 const normalizedRows = section.rows.map(r => 
