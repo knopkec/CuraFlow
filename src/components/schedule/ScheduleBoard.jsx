@@ -28,6 +28,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { db, api } from "@/api/client";
+import { cn } from '@/lib/utils';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useAuth } from '@/components/AuthProvider';
 import DraggableDoctor from './DraggableDoctor';
