@@ -7,6 +7,7 @@ import { ChevronLeft, ChevronRight, ChevronDown, Wand2, Loader2, Trash2, Eye, Ey
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from '@/components/ui/button';
+import { Slider } from '@/components/ui/slider';
 import {
     Dialog,
     DialogContent,
@@ -330,6 +331,20 @@ const formatMinutesAsTime = (minutes) => {
     return `${String(hours).padStart(2, '0')}:${String(remainingMinutes).padStart(2, '0')}`;
 };
 
+const formatDurationMinutes = (minutes) => {
+    const roundedMinutes = Math.max(0, Math.round(Number(minutes) || 0));
+    const hours = Math.floor(roundedMinutes / 60);
+    const restMinutes = roundedMinutes % 60;
+
+    if (hours > 0 && restMinutes > 0) {
+        return `${hours}h ${restMinutes}min`;
+    }
+    if (hours > 0) {
+        return `${hours}h`;
+    }
+    return `${restMinutes}min`;
+};
+
 const parseTimeToMinutes = (timeStr) => {
     if (!timeStr) return null;
     const parts = String(timeStr).split(':');
@@ -506,6 +521,118 @@ const getTimeslotDerivedTimeRange = (timeslot, doctor, workplace, workTimeModelM
         workMinutes: doctorDailyMinutes,
         appliedBreakMinutes: DEFAULT_BREAK_MINUTES,
     };
+};
+
+const buildTimeslotSelectionOption = (timeslot, doctor, workplace, workTimeModelMap) => {
+    const rawStartMinutes = parseTimeToMinutes(timeslot?.start_time);
+    let rawEndMinutes = parseTimeToMinutes(timeslot?.end_time);
+    if (rawStartMinutes === null || rawEndMinutes === null) {
+        return {
+            ...timeslot,
+            timeRange: formatTimeslotTimeRange(timeslot?.start_time, timeslot?.end_time),
+            effectiveTimeRange: null,
+            leavesEarly: false,
+            earlyLeaveLabel: null,
+            canCustomize: false,
+        };
+    }
+
+    if (rawEndMinutes <= rawStartMinutes) {
+        rawEndMinutes += 24 * 60;
+    }
+
+    const derivedRange = getTimeslotDerivedTimeRange(timeslot, doctor, workplace, workTimeModelMap);
+    const slotStartLabel = formatMinutesAsTime(rawStartMinutes);
+    const slotEndLabel = formatMinutesAsTime(rawEndMinutes);
+    const effectiveStartMinutes = derivedRange?.start ?? rawStartMinutes;
+    const effectiveEndMinutes = derivedRange?.displayEnd ?? derivedRange?.end ?? rawEndMinutes;
+    const effectiveStartLabel = formatMinutesAsTime(effectiveStartMinutes);
+    const effectiveEndLabel = formatMinutesAsTime(effectiveEndMinutes);
+    const slotDurationMinutes = rawEndMinutes - rawStartMinutes;
+    const effectivePresenceMinutes = Math.max(0, effectiveEndMinutes - effectiveStartMinutes);
+    const leavesEarly = Boolean(derivedRange) && effectiveEndMinutes < rawEndMinutes;
+    const maxCustomStartMinutes = Math.max(rawStartMinutes, rawEndMinutes - effectivePresenceMinutes);
+    const dailyMinutes = getDoctorTargetDailyMinutes(doctor, workTimeModelMap);
+
+    return {
+        ...timeslot,
+        timeRange: slotStartLabel && slotEndLabel ? `${slotStartLabel}-${slotEndLabel}` : formatTimeslotTimeRange(timeslot?.start_time, timeslot?.end_time),
+        effectiveTimeRange: effectiveStartLabel && effectiveEndLabel ? `${effectiveStartLabel}-${effectiveEndLabel}` : null,
+        leavesEarly,
+        earlyLeaveLabel: leavesEarly && effectiveEndLabel && slotEndLabel
+            ? `Bleibt bis ${effectiveEndLabel} statt bis ${slotEndLabel}`
+            : null,
+        shorterShiftNote: leavesEarly && dailyMinutes
+            ? `Tagesarbeitszeit ${formatDurationMinutes(dailyMinutes)} + ${DEFAULT_BREAK_MINUTES} Min Pause`
+            : null,
+        slotStartMinutes: rawStartMinutes,
+        slotEndMinutes: rawEndMinutes,
+        slotDurationMinutes,
+        effectiveStartMinutes,
+        effectiveEndMinutes,
+        effectivePresenceMinutes,
+        canCustomize: leavesEarly && effectivePresenceMinutes > 0 && maxCustomStartMinutes > rawStartMinutes,
+        defaultCustomStartMinutes: maxCustomStartMinutes,
+        minCustomStartMinutes: rawStartMinutes,
+        maxCustomStartMinutes,
+    };
+};
+
+const normalizeTimeslotSelection = (selection) => {
+    if (selection && typeof selection === 'object' && !Array.isArray(selection)) {
+        return {
+            timeslotId: selection.timeslotId ?? null,
+            startTime: selection.startTime ?? null,
+            endTime: selection.endTime ?? null,
+            breakMinutes: selection.breakMinutes ?? null,
+            isCustom: Boolean(selection.isCustom),
+        };
+    }
+
+    return {
+        timeslotId: selection === '__unassigned__' ? null : (selection ?? null),
+        startTime: null,
+        endTime: null,
+        breakMinutes: null,
+        isCustom: false,
+    };
+};
+
+const applyTimeslotSelectionToCreateData = (data, selection) => {
+    const normalizedSelection = normalizeTimeslotSelection(selection);
+    const nextData = { ...data };
+
+    if (normalizedSelection.timeslotId) {
+        nextData.timeslot_id = normalizedSelection.timeslotId;
+    }
+
+    if (normalizedSelection.isCustom) {
+        nextData.start_time = normalizedSelection.startTime;
+        nextData.end_time = normalizedSelection.endTime;
+        nextData.break_minutes = normalizedSelection.breakMinutes ?? DEFAULT_BREAK_MINUTES;
+    }
+
+    return nextData;
+};
+
+const applyTimeslotSelectionToUpdateData = (data, selection) => {
+    const normalizedSelection = normalizeTimeslotSelection(selection);
+    const nextData = {
+        ...data,
+        timeslot_id: normalizedSelection.timeslotId || null,
+    };
+
+    if (normalizedSelection.isCustom) {
+        nextData.start_time = normalizedSelection.startTime;
+        nextData.end_time = normalizedSelection.endTime;
+        nextData.break_minutes = normalizedSelection.breakMinutes ?? DEFAULT_BREAK_MINUTES;
+    } else {
+        nextData.start_time = null;
+        nextData.end_time = null;
+        nextData.break_minutes = null;
+    }
+
+    return nextData;
 };
 
 const getShiftTimeRangeLabel = (shift, doctor, workplace, workplaceTimeslots, workTimeModelMap) => {
@@ -971,6 +1098,8 @@ export default function ScheduleBoard() {
         workplaceName: '',
         description: '',
         options: [],
+        customOptionId: null,
+        customStartMinutes: null,
     });
 
     const openPoolEditDialog = (workplace, dateStr, shift = null) => {
@@ -984,6 +1113,8 @@ export default function ScheduleBoard() {
             workplaceName: '',
             description: '',
             options: [],
+            customOptionId: null,
+            customStartMinutes: null,
         });
     };
 
@@ -997,6 +1128,53 @@ export default function ScheduleBoard() {
         const callback = pendingTimeslotSelectionRef.current;
         closeTimeslotSelectionDialog();
         callback?.(timeslotId);
+    };
+
+    const openTimeslotCustomEditor = (option) => {
+        if (!option?.canCustomize) return;
+
+        setTimeslotSelectionDialog((current) => ({
+            ...current,
+            customOptionId: option.id,
+            customStartMinutes: option.defaultCustomStartMinutes,
+        }));
+    };
+
+    const handleTimeslotCustomStartChange = (option, value) => {
+        const nextStartMinutes = Array.isArray(value) ? value[0] : value;
+        const clampedStartMinutes = Math.min(
+            option.maxCustomStartMinutes,
+            Math.max(option.minCustomStartMinutes, Math.round(Number(nextStartMinutes) || option.defaultCustomStartMinutes))
+        );
+
+        setTimeslotSelectionDialog((current) => ({
+            ...current,
+            customOptionId: option.id,
+            customStartMinutes: clampedStartMinutes,
+        }));
+    };
+
+    const handleTimeslotCustomApply = (option) => {
+        const callback = pendingTimeslotSelectionRef.current;
+        if (!callback || !option) return;
+
+        const customStartMinutes = Math.min(
+            option.maxCustomStartMinutes,
+            Math.max(
+                option.minCustomStartMinutes,
+                Math.round(Number(timeslotSelectionDialog.customStartMinutes) || option.defaultCustomStartMinutes)
+            )
+        );
+        const customEndMinutes = customStartMinutes + option.effectivePresenceMinutes;
+
+        closeTimeslotSelectionDialog();
+        callback({
+            timeslotId: option.id,
+            startTime: formatMinutesAsTime(customStartMinutes),
+            endTime: formatMinutesAsTime(customEndMinutes),
+            breakMinutes: DEFAULT_BREAK_MINUTES,
+            isCustom: true,
+        });
     };
 
     // Map of date → Set of central_employee_ids busy on that date. Used to
@@ -2385,24 +2563,25 @@ export default function ScheduleBoard() {
 
         const workplaceByName = useMemo(() => new Map(workplaces.map((workplace) => [workplace.name, workplace])), [workplaces]);
 
-    const getPositionTimeslotOptions = (positionName) => {
+    const getPositionTimeslotOptions = (positionName, doctorId = null) => {
         const workplace = workplaceByName.get(positionName);
         if (!workplace?.timeslots_enabled) return [];
 
+        const doctor = doctorId ? doctorById.get(doctorId) : null;
+
         return (workplaceTimeslotsByWorkplaceId.get(workplace.id) || []).map((timeslot) => ({
-            ...timeslot,
-            timeRange: formatTimeslotTimeRange(timeslot.start_time, timeslot.end_time),
+            ...buildTimeslotSelectionOption(timeslot, doctor, workplace, workTimeModelMap),
         }));
     };
 
-    const resolveTimeslotSelection = ({ positionName, dateStr = null, requestedTimeslotId = null, onResolved }) => {
+    const resolveTimeslotSelection = ({ positionName, dateStr = null, requestedTimeslotId = null, onResolved, doctorId = null }) => {
         const normalizedTimeslotId = requestedTimeslotId === '__unassigned__' ? null : requestedTimeslotId;
         if (normalizedTimeslotId) {
             onResolved(normalizedTimeslotId);
             return true;
         }
 
-        const options = getPositionTimeslotOptions(positionName);
+        const options = getPositionTimeslotOptions(positionName, doctorId);
         if (options.length === 0) {
             onResolved(null);
             return true;
@@ -2422,6 +2601,8 @@ export default function ScheduleBoard() {
                 ? `${positionName} am ${formattedDate} hat mehrere Zeitfenster.`
                 : `${positionName} hat mehrere Zeitfenster.`,
             options,
+            customOptionId: null,
+            customStartMinutes: null,
         });
         return false;
     };
@@ -2731,7 +2912,9 @@ export default function ScheduleBoard() {
         const rawNewTimeslotId = destParts[2] || null;
         if (!newDateStr || !newPosition) return;
 
-        const executePreviewMove = (resolvedPreviewTimeslotId) => {
+        const executePreviewMove = (selection) => {
+            const normalizedSelection = normalizeTimeslotSelection(selection);
+            const resolvedPreviewTimeslotId = normalizedSelection.timeslotId;
             const absencePositions = ["Frei", "Krank", "Urlaub", "Dienstreise", "Nicht verfügbar"];
             if (!absencePositions.includes(newPosition)) {
                 const wp = workplaces.find(w => w.name === newPosition);
@@ -2770,7 +2953,10 @@ export default function ScheduleBoard() {
 
             let updated = previewShifts.map(s => {
                 if (s.id !== shiftId) return s;
-                const nextShift = { ...s, date: newDateStr, position: newPosition };
+                const nextShift = applyTimeslotSelectionToUpdateData(
+                    { ...s, date: newDateStr, position: newPosition },
+                    normalizedSelection
+                );
                 if (resolvedPreviewTimeslotId) {
                     nextShift.timeslot_id = resolvedPreviewTimeslotId;
                 } else {
@@ -2794,6 +2980,7 @@ export default function ScheduleBoard() {
             dateStr: newDateStr,
             requestedTimeslotId: rawNewTimeslotId,
             onResolved: executePreviewMove,
+            doctorId: previewShift.doctor_id,
         })) {
             return;
         }
@@ -2924,7 +3111,9 @@ export default function ScheduleBoard() {
 
         if (!doctorId) return;
 
-        const assignWeekdaysToTimeslot = async (resolvedTimeslotId) => {
+        const assignWeekdaysToTimeslot = async (selection) => {
+            const normalizedSelection = normalizeTimeslotSelection(selection);
+            const resolvedTimeslotId = normalizedSelection.timeslotId;
             const monday = startOfWeek(currentDate, { weekStartsOn: 1 });
             const allWeekDays = [0, 1, 2, 3, 4, 5, 6].map(offset => addDays(monday, offset));
             const daysToAssign = allWeekDays.filter(day => isWorkplaceActiveOnDate(rowName, format(day, 'yyyy-MM-dd')));
@@ -2998,11 +3187,10 @@ export default function ScheduleBoard() {
                     doctor_id: doctorId,
                     order: maxOrder + 1
                 };
-                // '__unassigned__' bedeutet explizit kein Timeslot (Altdaten-Zeile)
-                if (effectiveTsId) {
-                    newShiftData.timeslot_id = effectiveTsId;
-                }
-                toCreate.push(newShiftData);
+                toCreate.push(applyTimeslotSelectionToCreateData(newShiftData, {
+                    ...normalizedSelection,
+                    timeslotId: effectiveTsId,
+                }));
                 successCount++;
             }
 
@@ -3024,9 +3212,10 @@ export default function ScheduleBoard() {
         if (!resolveTimeslotSelection({
             positionName: rowName,
             requestedTimeslotId: rowHeaderTimeslotId,
-            onResolved: (timeslotId) => {
-                void assignWeekdaysToTimeslot(timeslotId);
+            onResolved: (selection) => {
+                void assignWeekdaysToTimeslot(selection);
             },
+            doctorId,
         })) {
             return;
         }
@@ -3114,7 +3303,9 @@ export default function ScheduleBoard() {
 
         // PREVIEW MODE: Add to previewShifts instead of creating DB entry
         if (previewShifts) {
-            const executePreviewCreate = (resolvedPreviewTimeslotId) => {
+            const executePreviewCreate = (selection) => {
+                const normalizedSelection = normalizeTimeslotSelection(selection);
+                const resolvedPreviewTimeslotId = normalizedSelection.timeslotId;
                 const duplicate = currentWeekShifts.find((shift) => {
                     if (shift.date !== dateStr || shift.position !== position || shift.doctor_id !== doctorId) return false;
                     if (resolvedPreviewTimeslotId) return shift.timeslot_id === resolvedPreviewTimeslotId;
@@ -3126,10 +3317,13 @@ export default function ScheduleBoard() {
                 }
 
                 const newId = `preview-add-${Date.now()}`;
-                const newPreviewShift = { id: newId, date: dateStr, position, doctor_id: doctorId, isPreview: true };
-                if (resolvedPreviewTimeslotId) {
-                    newPreviewShift.timeslot_id = resolvedPreviewTimeslotId;
-                }
+                const newPreviewShift = {
+                    ...applyTimeslotSelectionToCreateData(
+                        { id: newId, date: dateStr, position, doctor_id: doctorId },
+                        normalizedSelection
+                    ),
+                    isPreview: true,
+                };
 
                 let updatedPreviews = [...previewShifts, newPreviewShift];
                 if (isAutoOffPosition(position)) {
@@ -3144,13 +3338,16 @@ export default function ScheduleBoard() {
                 dateStr,
                 requestedTimeslotId: rawTimeslotId,
                 onResolved: executePreviewCreate,
+                doctorId,
             })) {
                 return;
             }
             return;
         }
 
-        const executeCreateDrop = (timeslotId) => {
+        const executeCreateDrop = (selection) => {
+            const normalizedSelection = normalizeTimeslotSelection(selection);
+            const timeslotId = normalizedSelection.timeslotId;
             console.log('Dropping Doctor:', doctorId, 'to', dateStr, position, 'timeslotId:', timeslotId);
 
             const dropBlock = getScheduleBlock(dateStr, position, timeslotId);
@@ -3250,8 +3447,13 @@ export default function ScheduleBoard() {
                     const maxOrder = existingInCell.reduce((max, s) => Math.max(max, s.order || 0), -1);
                     const newOrder = maxOrder + 1;
 
-                    const newShiftData = { date: dateStr, position, doctor_id: doctorId, order: newOrder };
-                    if (effectiveTsId) newShiftData.timeslot_id = effectiveTsId;
+                    const newShiftData = applyTimeslotSelectionToCreateData(
+                        { date: dateStr, position, doctor_id: doctorId, order: newOrder },
+                        {
+                            ...normalizedSelection,
+                            timeslotId: effectiveTsId,
+                        }
+                    );
                     shiftsToCreate.push(newShiftData);
                 }
 
@@ -3316,6 +3518,7 @@ export default function ScheduleBoard() {
             dateStr,
             requestedTimeslotId: rawTimeslotId,
             onResolved: executeCreateDrop,
+            doctorId,
         })) {
             return;
         }
@@ -3326,12 +3529,15 @@ export default function ScheduleBoard() {
     // Dragged from Grid to Grid
     if (sourceDroppableId !== 'sidebar' && !sourceDroppableId.startsWith('available__') && destinationDroppableId !== 'sidebar' && destinationDroppableId !== 'trash' && destinationDroppableId !== 'trash-overlay' && !destinationDroppableId.endsWith('__Verfügbar') && !destinationDroppableId.startsWith('available__')) {
         const shiftId = normalizedDraggableId.replace('shift-', '');
+        const movingShift = currentWeekShifts.find(s => s.id === shiftId);
         // Format: date__position oder date__position__timeslotId
         const destParts = destinationDroppableId.split('__');
         const newDateStr = destParts[0];
         const newPosition = destParts[1];
         const rawNewTimeslotId = destParts[2] || null;
-        const executeGridDrop = (newTimeslotId) => {
+        const executeGridDrop = (selection) => {
+            const normalizedSelection = normalizeTimeslotSelection(selection);
+            const newTimeslotId = normalizedSelection.timeslotId;
             if (!absencePositions.includes(newPosition) && !isWorkplaceActiveOnDate(newPosition, newDateStr)) {
                 toast.error('Diese Position ist an diesem Tag nicht aktiv.');
                 return;
@@ -3399,8 +3605,10 @@ export default function ScheduleBoard() {
                         const maxOrder = existingInNewCell.reduce((max, s) => Math.max(max, s.order || 0), -1);
                         const newOrder = maxOrder + 1;
 
-                        const copyData = { date: newDateStr, position: newPosition, doctor_id: shift.doctor_id, order: newOrder };
-                        if (newTimeslotId) copyData.timeslot_id = newTimeslotId;
+                        const copyData = applyTimeslotSelectionToCreateData(
+                            { date: newDateStr, position: newPosition, doctor_id: shift.doctor_id, order: newOrder },
+                            normalizedSelection
+                        );
 
                         createShiftMutation.mutate(copyData, {
                             onSuccess: () => {
@@ -3436,8 +3644,10 @@ export default function ScheduleBoard() {
                     const maxOrder = existingInNewCell.reduce((max, s) => Math.max(max, s.order || 0), -1);
                     const newOrder = maxOrder + 1;
 
-                    const copyData = { date: newDateStr, position: newPosition, doctor_id: shift.doctor_id, order: newOrder };
-                    if (newTimeslotId) copyData.timeslot_id = newTimeslotId;
+                    const copyData = applyTimeslotSelectionToCreateData(
+                        { date: newDateStr, position: newPosition, doctor_id: shift.doctor_id, order: newOrder },
+                        normalizedSelection
+                    );
 
                     createShiftMutation.mutate(copyData, {
                         onSuccess: () => {
@@ -3483,10 +3693,10 @@ export default function ScheduleBoard() {
                     const maxOrder = existingInNewCell.reduce((max, s) => Math.max(max, s.order || 0), -1);
                     const newOrder = maxOrder + 1;
 
-                    const updateData = { date: newDateStr, position: newPosition, order: newOrder };
-                    if (newTimeslotId !== undefined) {
-                        updateData.timeslot_id = newTimeslotId;
-                    }
+                    const updateData = applyTimeslotSelectionToUpdateData(
+                        { date: newDateStr, position: newPosition, order: newOrder },
+                        normalizedSelection
+                    );
 
                     updateShiftMutation.mutate(
                         { id: shiftId, data: updateData },
@@ -3522,10 +3732,10 @@ export default function ScheduleBoard() {
                 const maxOrder = existingInNewCell.reduce((max, s) => Math.max(max, s.order || 0), -1);
                 const newOrder = maxOrder + 1;
 
-                const updateData = { date: newDateStr, position: newPosition, order: newOrder };
-                if (newTimeslotId !== undefined) {
-                    updateData.timeslot_id = newTimeslotId;
-                }
+                const updateData = applyTimeslotSelectionToUpdateData(
+                    { date: newDateStr, position: newPosition, order: newOrder },
+                    normalizedSelection
+                );
 
                 updateShiftMutation.mutate(
                     { id: shiftId, data: updateData },
@@ -3548,6 +3758,7 @@ export default function ScheduleBoard() {
             dateStr: newDateStr,
             requestedTimeslotId: rawNewTimeslotId,
             onResolved: executeGridDrop,
+            doctorId: movingShift?.doctor_id || null,
         })) {
             return;
         }
@@ -5260,26 +5471,137 @@ export default function ScheduleBoard() {
       />
 
       <Dialog open={timeslotSelectionDialog.open} onOpenChange={handleTimeslotDialogOpenChange}>
-          <DialogContent className="sm:max-w-md" data-testid="schedule-timeslot-selection-dialog">
+          <DialogContent className="sm:max-w-2xl" data-testid="schedule-timeslot-selection-dialog">
               <DialogHeader>
                   <DialogTitle>Zeitfenster wählen</DialogTitle>
                   <DialogDescription>{timeslotSelectionDialog.description}</DialogDescription>
               </DialogHeader>
-              <div className="space-y-2">
-                  {timeslotSelectionDialog.options.map((timeslot) => (
-                      <button
-                          key={timeslot.id}
-                          type="button"
-                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-left transition-colors hover:border-indigo-300 hover:bg-indigo-50"
-                          onClick={() => handleTimeslotDialogSelect(timeslot.id)}
-                          data-testid={`schedule-timeslot-option-${timeslot.id}`}
-                      >
-                          <div className="font-medium text-slate-900">{timeslot.label || 'Zeitfenster'}</div>
-                          {timeslot.timeRange && (
-                              <div className="text-sm text-slate-500">{timeslot.timeRange}</div>
-                          )}
-                      </button>
-                  ))}
+              <div className="space-y-3">
+                  {timeslotSelectionDialog.options.map((timeslot) => {
+                      const isCustomOpen = timeslotSelectionDialog.customOptionId === timeslot.id;
+                      const customStartMinutes = isCustomOpen
+                          ? (timeslotSelectionDialog.customStartMinutes ?? timeslot.defaultCustomStartMinutes)
+                          : timeslot.defaultCustomStartMinutes;
+                      const customEndMinutes = customStartMinutes + (timeslot.effectivePresenceMinutes || 0);
+                      const slotDuration = Math.max(timeslot.slotDurationMinutes || 1, 1);
+                      const customLeftPercent = ((customStartMinutes - timeslot.slotStartMinutes) / slotDuration) * 100;
+                      const customWidthPercent = ((timeslot.effectivePresenceMinutes || 0) / slotDuration) * 100;
+
+                      return (
+                          <div
+                              key={timeslot.id}
+                              className={cn(
+                                  'rounded-xl border p-4 transition-colors',
+                                  timeslot.leavesEarly
+                                      ? 'border-amber-200 bg-amber-50/70'
+                                      : 'border-slate-200 bg-white'
+                              )}
+                          >
+                              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                  <div className="space-y-1">
+                                      <div className="flex items-center gap-2">
+                                          <div className="font-medium text-slate-900">{timeslot.label || 'Zeitfenster'}</div>
+                                          {timeslot.leavesEarly && (
+                                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                                                  <AlertTriangle className="h-3.5 w-3.5" />
+                                                  Verkürzter Einsatz
+                                              </span>
+                                          )}
+                                      </div>
+                                      {timeslot.timeRange && (
+                                          <div className="text-sm text-slate-500">Slot: {timeslot.timeRange}</div>
+                                      )}
+                                      {timeslot.effectiveTimeRange && timeslot.effectiveTimeRange !== timeslot.timeRange && (
+                                          <div className="text-sm font-medium text-indigo-700">Geplanter Einsatz: {timeslot.effectiveTimeRange}</div>
+                                      )}
+                                      {timeslot.earlyLeaveLabel && (
+                                          <div className="text-sm font-medium text-amber-800">{timeslot.earlyLeaveLabel}</div>
+                                      )}
+                                      {timeslot.shorterShiftNote && (
+                                          <div className="text-xs text-amber-700">{timeslot.shorterShiftNote}</div>
+                                      )}
+                                  </div>
+                                  <div className="flex shrink-0 flex-wrap gap-2">
+                                      <Button
+                                          type="button"
+                                          size="sm"
+                                          onClick={() => handleTimeslotDialogSelect(timeslot.id)}
+                                          data-testid={`schedule-timeslot-option-${timeslot.id}`}
+                                      >
+                                          Standard
+                                      </Button>
+                                      {timeslot.canCustomize && (
+                                          <Button
+                                              type="button"
+                                              size="sm"
+                                              variant={isCustomOpen ? 'default' : 'outline'}
+                                              onClick={() => openTimeslotCustomEditor(timeslot)}
+                                              data-testid={`schedule-timeslot-custom-${timeslot.id}`}
+                                          >
+                                              Custom
+                                          </Button>
+                                      )}
+                                  </div>
+                              </div>
+
+                              {timeslot.canCustomize && isCustomOpen && (
+                                  <div className="mt-4 rounded-lg border border-indigo-200 bg-indigo-50/60 p-4">
+                                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                                          <div>
+                                              <div className="text-sm font-medium text-slate-900">Custom Startzeit</div>
+                                              <div className="text-xs text-slate-600">Verschiebe den Einsatz innerhalb des gewählten Zeitfensters.</div>
+                                          </div>
+                                          <div className="rounded-md bg-white px-3 py-1 text-sm font-medium text-indigo-700 shadow-sm">
+                                              {formatMinutesAsTime(customStartMinutes)}-{formatMinutesAsTime(customEndMinutes)}
+                                          </div>
+                                      </div>
+
+                                      <div className="space-y-3">
+                                          <div className="relative overflow-hidden rounded-full bg-slate-200/90 h-4">
+                                              <div className="absolute inset-y-0 left-0 right-0 bg-slate-300/80" />
+                                              <div
+                                                  className="absolute inset-y-0 rounded-full bg-indigo-500 shadow-sm"
+                                                  style={{
+                                                      left: `${customLeftPercent}%`,
+                                                      width: `${Math.min(customWidthPercent, 100)}%`,
+                                                  }}
+                                              />
+                                          </div>
+                                          <div className="flex justify-between text-[11px] text-slate-500">
+                                              <span>{formatMinutesAsTime(timeslot.slotStartMinutes)}</span>
+                                              <span>{formatMinutesAsTime(timeslot.slotEndMinutes)}</span>
+                                          </div>
+                                          <Slider
+                                              value={[customStartMinutes]}
+                                              min={timeslot.minCustomStartMinutes}
+                                              max={timeslot.maxCustomStartMinutes}
+                                              step={5}
+                                              onValueChange={(value) => handleTimeslotCustomStartChange(timeslot, value)}
+                                              data-testid={`schedule-timeslot-custom-slider-${timeslot.id}`}
+                                          />
+                                          <div className="flex items-center justify-between text-xs text-slate-600">
+                                              <span>Dauer inkl. Pause: {formatDurationMinutes(timeslot.effectivePresenceMinutes)}</span>
+                                              <span>Einsatz endet innerhalb des Slots</span>
+                                          </div>
+                                          <div className="flex justify-end gap-2 pt-1">
+                                              <Button type="button" size="sm" variant="outline" onClick={closeTimeslotSelectionDialog}>
+                                                  Abbrechen
+                                              </Button>
+                                              <Button
+                                                  type="button"
+                                                  size="sm"
+                                                  onClick={() => handleTimeslotCustomApply(timeslot)}
+                                                  data-testid={`schedule-timeslot-custom-apply-${timeslot.id}`}
+                                              >
+                                                  Custom übernehmen
+                                              </Button>
+                                          </div>
+                                      </div>
+                                  </div>
+                              )}
+                          </div>
+                      );
+                  })}
               </div>
               <DialogFooter>
                   <Button variant="outline" onClick={closeTimeslotSelectionDialog}>Abbrechen</Button>
