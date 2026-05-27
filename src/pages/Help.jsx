@@ -33,7 +33,6 @@ import {
     Shield,
     Database,
     Palette,
-    ChevronRight,
     Percent
 } from 'lucide-react';
 import { useTeamRoles } from '@/components/settings/TeamRoleSettings';
@@ -191,11 +190,11 @@ export default function HelpPage() {
                             <div className="grid gap-4 md:grid-cols-2">
                                 <div className="p-4 bg-purple-50 rounded-lg border border-purple-100">
                                     <h4 className="font-semibold text-purple-900 mb-2 flex items-center gap-2">
-                                        <ChevronRight className="w-4 h-4" />
-                                        Aufklappen
+                                        <Clock className="w-4 h-4" />
+                                        Auswahl beim Einteilen
                                     </h4>
                                     <p className="text-sm text-purple-800">
-                                        Klicken Sie auf das Chevron-Symbol neben dem Arbeitsplatz, um die einzelnen Zeitfenster anzuzeigen. Bei nur einem Timeslot verhält sich der Arbeitsplatz wie normal.
+                                        Arbeitsplätze mit mehreren Zeitfenstern bleiben kompakt. Beim Drag-and-drop in die Zelle erscheint eine Auswahl für das gewünschte Zeitfenster. Bei nur einem Timeslot erfolgt die Zuweisung weiterhin direkt.
                                     </p>
                                 </div>
                                 <div className="p-4 bg-purple-50 rounded-lg border border-purple-100">

@@ -43,14 +43,14 @@ function LateStartIndicator({ tooltip, compact = false }) {
   );
 }
 
-export default function DraggableShift({ shift, doctor, index, onRemove, displayMode = 'compact', compactLabel = null, isDragDisabled, fontSize = 14, boxSize = 48, currentUserDoctorId, highlightMyName = true, isBeingDragged = false, qualificationStatus = null, fairnessInfo = null, wishMarker = null, draggableIdPrefix = '', timeslotLabel = null, timeslotLabelTone = 'default', showLateStartIndicator = false, lateStartTooltip = 'Später Dienst mit Rotationsmöglichkeit', ...props }) {
+export default function DraggableShift({ shift, doctor, index, onRemove: _onRemove, displayMode = 'compact', compactLabel = null, isDragDisabled, fontSize = 14, boxSize = 48, currentUserDoctorId, highlightMyName = true, isBeingDragged = false, qualificationStatus = null, fairnessInfo = null, wishMarker = null, draggableIdPrefix = '', timeslotLabel = null, timeslotLabelTone = 'default', timeLabelOverride = null, showLateStartIndicator = false, lateStartTooltip = 'Später Dienst mit Rotationsmöglichkeit', ...props }) {
   const isPreview = shift.isPreview;
   const isCurrentUser = currentUserDoctorId && doctor.id === currentUserDoctorId;
   const isFullWidth = displayMode === 'full';
   const chipLabel = compactLabel || getDoctorShortLabel(doctor);
   const displayText = isFullWidth ? doctor.name : chipLabel;
   const displayFontSize = fontSize;
-  const timeLabel = getTimeLabel(shift);
+  const timeLabel = timeLabelOverride || getTimeLabel(shift);
   const timeslotBadgeClasses = timeslotLabelTone === 'warning'
     ? 'bg-amber-300 text-amber-950'
     : 'bg-indigo-600 text-white';

@@ -45,6 +45,20 @@ describe('schedule shift lookup', () => {
         }).map((shift) => shift.id)).toEqual(['am', 'other']);
     });
 
+    it('includes legacy unassigned shifts in compact timeslot-enabled rows', () => {
+        const shiftLookup = createScheduleShiftLookup([
+            { id: 'legacy', date: '2026-05-26', position: 'CT', doctor_id: 'doc-1', order: 1 },
+            { id: 'pm', date: '2026-05-26', position: 'CT', doctor_id: 'doc-2', timeslot_id: 'pm', order: 2 },
+        ]);
+
+        expect(getShiftsForScheduleCell({
+            shiftLookup,
+            dateStr: '2026-05-26',
+            rowName: 'CT',
+            allTimeslotIds: ['am', 'pm'],
+        }).map((shift) => shift.id)).toEqual(['legacy', 'pm']);
+    });
+
     it('hides group-header shifts when timeslots are enabled', () => {
         const shiftLookup = createScheduleShiftLookup(shifts);
 

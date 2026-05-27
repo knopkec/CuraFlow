@@ -8,6 +8,14 @@ import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from '@/components/ui/button';
 import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -305,11 +313,6 @@ const DEFAULT_FULLTIME_DAILY_HOURS = 7.7;
 const ROUTINE_SERVICE_START_MINUTES = 7 * 60;
 const LATE_ROTATION_THRESHOLD_MINUTES = ROUTINE_SERVICE_START_MINUTES + (4 * 60);
 
-const formatTimeslotEndTime = (endTime) => {
-    if (!endTime) return null;
-    return endTime.substring(0, 5);
-};
-
 const formatTimeslotStartTime = (startTime) => {
     if (!startTime) return null;
     return startTime.substring(0, 5);
@@ -388,14 +391,6 @@ const buildShiftInterval = (shift, doctor, workplace, timeslot, workTimeModelMap
     };
 };
 
-const formatMinutesAsTime = (totalMinutes) => {
-    if (totalMinutes === null || totalMinutes === undefined) return null;
-    const normalized = ((totalMinutes % (24 * 60)) + (24 * 60)) % (24 * 60);
-    const hours = Math.floor(normalized / 60);
-    const minutes = normalized % 60;
-    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-};
-
 const getExpandedTimeslotRowLabel = (rowObj, rowDisplayName) => {
     if (!rowObj?.isTimeslotRow || rowObj?.isUnassignedRow) {
         return rowDisplayName;
@@ -462,37 +457,15 @@ const getDoctorTargetDailyHours = (doctor, workTimeModelMap) => {
     return null;
 };
 
-const getShiftTimeslotBadge = (shift, doctor, workplaceTimeslots, workTimeModelMap) => {
-    if (!shift?.timeslot_id) return { label: null, tone: 'default' };
-
-    const timeslot = workplaceTimeslots.find(t => t.id === shift.timeslot_id);
-    if (!timeslot?.end_time) {
-        return { label: null, tone: 'default' };
+const getShiftTimeRangeLabel = (shift, workplaceTimeslots) => {
+    if (shift?.start_time && shift?.end_time) {
+        return formatTimeslotTimeRange(shift.start_time, shift.end_time);
     }
 
-    const defaultEndTime = formatTimeslotEndTime(timeslot.end_time);
-    const startMinutes = parseTimeToMinutes(timeslot.start_time);
-    const endMinutes = parseTimeToMinutes(timeslot.end_time);
-    const dailyHours = getDoctorTargetDailyHours(doctor, workTimeModelMap);
+    if (!shift?.timeslot_id) return null;
 
-    if (startMinutes === null || endMinutes === null || !dailyHours) {
-        return { label: defaultEndTime, tone: 'default' };
-    }
-
-    let slotDurationMinutes = endMinutes - startMinutes;
-    if (slotDurationMinutes < 0) {
-        slotDurationMinutes += 24 * 60;
-    }
-
-    const allowedMinutes = Math.round(dailyHours * 60);
-    if (allowedMinutes <= 0 || slotDurationMinutes <= allowedMinutes) {
-        return { label: defaultEndTime, tone: 'default' };
-    }
-
-    return {
-        label: formatMinutesAsTime(startMinutes + allowedMinutes),
-        tone: 'warning'
-    };
+    const timeslot = workplaceTimeslots.find((entry) => entry.id === shift.timeslot_id);
+    return formatTimeslotTimeRange(timeslot?.start_time, timeslot?.end_time);
 };
 
 const getLateRotationIndicator = (shift, workplace, workplaceTimeslots) => {
@@ -808,113 +781,12 @@ export default function ScheduleBoard() {
       }
   }, [collapsedSections, updateMe, user]);
 
-  // State für eingeklappte Timeslot-Gruppen (Arbeitsplatz-Namen)
-  const [collapsedTimeslotGroups, setCollapsedTimeslotGroups] = useState(() => {
-      try {
-          const saved = localStorage.getItem('radioplan_collapsedTimeslotGroups');
-          return saved ? JSON.parse(saved) : [];
-      } catch {
-          return [];
-      }
-  });
-    const savedCollapsedGroupsRef = useRef(null);
-  const droppedInTimeslotGroupRef = useRef(null);
     const dragAutoScrollerOptions = useMemo(() => ({
         startFromPercentage: 0.12,
         maxScrollAtPercentage: 0.04,
         maxPixelScroll: 30,
             ease: (value) => value,
     }), []);
-
-  useEffect(() => {
-      localStorage.setItem('radioplan_collapsedTimeslotGroups', JSON.stringify(collapsedTimeslotGroups));
-  }, [collapsedTimeslotGroups]);
-
-  const toggleTimeslotGroup = (workplaceName) => {
-      setCollapsedTimeslotGroups(prev => 
-          prev.includes(workplaceName) 
-              ? prev.filter(n => n !== workplaceName) 
-              : [...prev, workplaceName]
-      );
-  };
-
-  const expandTimeslotGroup = (workplaceName) => {
-      if (!workplaceName) return false;
-
-      let didExpand = false;
-      setCollapsedTimeslotGroups(prev => {
-          if (!prev.includes(workplaceName)) {
-              return prev;
-          }
-
-          didExpand = true;
-          return prev.filter(n => n !== workplaceName);
-      });
-
-      return didExpand;
-  };
-
-  const collapseTimeslotGroup = (workplaceName) => {
-      if (!workplaceName) return false;
-
-      let didCollapse = false;
-      setCollapsedTimeslotGroups(prev => {
-          if (prev.includes(workplaceName)) {
-              return prev;
-          }
-
-          didCollapse = true;
-          return [...prev, workplaceName];
-      });
-
-      return didCollapse;
-  };
-
-  const getCollapsedTimeslotGroupTarget = (droppableId) => {
-      const normalizedDroppableId = stripPanelPrefix(droppableId || '');
-      if (!normalizedDroppableId || !normalizedDroppableId.endsWith('__allTimeslots__')) {
-          return null;
-      }
-
-      if (normalizedDroppableId.startsWith('rowHeader__')) {
-          const headerParts = normalizedDroppableId.replace('rowHeader__', '').split('__');
-          return headerParts[0] || null;
-      }
-
-      const parts = normalizedDroppableId.split('__');
-      return parts[1] || null;
-  };
-
-  const getWorkplaceNameFromDroppableId = (droppableId) => {
-      const normalizedDroppableId = stripPanelPrefix(droppableId || '');
-      if (!normalizedDroppableId) return null;
-
-      if (normalizedDroppableId.startsWith('rowHeader__')) {
-          const headerParts = normalizedDroppableId.replace('rowHeader__', '').split('__');
-          return headerParts[0] || null;
-      }
-
-      const parts = normalizedDroppableId.split('__');
-      return parts[1] || null;
-  };
-
-  const isSpecificTimeslotDestination = (droppableId, workplaceName) => {
-      const normalizedDroppableId = stripPanelPrefix(droppableId || '');
-      if (!normalizedDroppableId) return false;
-
-      const targetWorkplace = getWorkplaceNameFromDroppableId(normalizedDroppableId);
-      if (!targetWorkplace || targetWorkplace !== workplaceName) return false;
-
-      if (normalizedDroppableId.startsWith('rowHeader__')) {
-          const headerParts = normalizedDroppableId.replace('rowHeader__', '').split('__');
-          const rawTimeslotId = headerParts[1] || null;
-          return !!rawTimeslotId && rawTimeslotId !== 'allTimeslots';
-      }
-
-      const parts = normalizedDroppableId.split('__');
-      const rawTimeslotId = parts[2] || null;
-      return !!rawTimeslotId && rawTimeslotId !== 'allTimeslots';
-  };
 
   useEffect(() => {
       localStorage.setItem('radioplan_gridFontSize', JSON.stringify(gridFontSize));
@@ -926,7 +798,6 @@ export default function ScheduleBoard() {
   const [draggingDoctorId, setDraggingDoctorId] = useState(null);
   const [draggingShiftId, setDraggingShiftId] = useState(null);
   const [isDraggingFromGrid, setIsDraggingFromGrid] = useState(false);
-        const [isAvailableTimeslotMeasurementMode, setIsAvailableTimeslotMeasurementMode] = useState(false);
     const [activeSectionTabId, setActiveSectionTabId] = useState(initialState.activeSectionTabId);
     const [isSplitViewEnabled, setIsSplitViewEnabled] = useState(false);
     const [splitSectionTabId, setSplitSectionTabId] = useState('');
@@ -1004,9 +875,38 @@ export default function ScheduleBoard() {
 
     // Local state for the cross-tenant edit dialog launched from the board cells.
     const [poolEditDialog, setPoolEditDialog] = useState({ open: false, workplace: null, date: null, shift: null });
+    const pendingTimeslotSelectionRef = useRef(null);
+    const [timeslotSelectionDialog, setTimeslotSelectionDialog] = useState({
+        open: false,
+        workplaceName: '',
+        description: '',
+        options: [],
+    });
 
     const openPoolEditDialog = (workplace, dateStr, shift = null) => {
         setPoolEditDialog({ open: true, workplace, date: dateStr, shift });
+    };
+
+    const closeTimeslotSelectionDialog = () => {
+        pendingTimeslotSelectionRef.current = null;
+        setTimeslotSelectionDialog({
+            open: false,
+            workplaceName: '',
+            description: '',
+            options: [],
+        });
+    };
+
+    const handleTimeslotDialogOpenChange = (open) => {
+        if (!open) {
+            closeTimeslotSelectionDialog();
+        }
+    };
+
+    const handleTimeslotDialogSelect = (timeslotId) => {
+        const callback = pendingTimeslotSelectionRef.current;
+        closeTimeslotSelectionDialog();
+        callback?.(timeslotId);
     };
 
     // Map of date → Set of central_employee_ids busy on that date. Used to
@@ -1163,7 +1063,7 @@ export default function ScheduleBoard() {
             const customCategories = getWorkplaceCategoriesFromSettings(systemSettings);
             const customCategoryNames = customCategories.map(category => category.name);
 
-      // Hilfsfunktion: Erstellt Zeilen für Arbeitsplätze (mit Timeslot-Expansion)
+      // Hilfsfunktion: Erstellt Zeilen für Arbeitsplätze (kompakt mit optionalen Timeslot-Metadaten)
       const createRowsForCategory = (categoryName) => {
           const categoryWorkplaces = workplaces
               .filter(w => w.category === categoryName)
@@ -1172,10 +1072,7 @@ export default function ScheduleBoard() {
           const rows = [];
           for (const wp of categoryWorkplaces) {
               if (wp.timeslots_enabled) {
-                  // Arbeitsplatz mit Timeslots - erstelle Sub-Zeilen
-                  const wpTimeslots = workplaceTimeslots
-                      .filter(t => t.workplace_id === wp.id)
-                      .sort((a, b) => (a.order || 0) - (b.order || 0));
+                  const wpTimeslots = workplaceTimeslotsByWorkplaceId.get(wp.id) || [];
                   
                   if (wpTimeslots.length === 1) {
                       // NUR 1 Timeslot: Verhalte dich wie normaler Workplace
@@ -1191,47 +1088,24 @@ export default function ScheduleBoard() {
                           singleTimeslotLabel: wpTimeslots[0].label
                       });
                   } else if (wpTimeslots.length > 1) {
-                      // Mehr als 1 Timeslot: Expandierbare Gruppe
-                      // Zuerst: Header-Zeile für die Gruppe (zum Ein-/Ausklappen)
                       rows.push({
                           name: wp.name,
                           displayName: wp.name,
                           timeslotId: null,
                           timeslotLabel: null,
                           isTimeslotRow: false,
-                          isTimeslotGroupHeader: true,
+                          isTimeslotGroupHeader: false,
                           timeslotCount: wpTimeslots.length,
                           allTimeslotIds: wpTimeslots.map(t => t.id),
-                          workplaceId: wp.id  // Für spätere Prüfung auf Altdaten
+                          workplaceId: wp.id,
+                          timeslotSummary: wpTimeslots
+                              .map((timeslot) => {
+                                  const range = formatTimeslotTimeRange(timeslot.start_time, timeslot.end_time);
+                                  return timeslot.label ? `${timeslot.label}${range ? ` ${range}` : ''}` : range;
+                              })
+                              .filter(Boolean)
+                              .join(' · ')
                       });
-                      
-                      // "Nicht zugewiesen" Zeile wird immer eingefügt, aber später gefiltert
-                      // wenn keine Altdaten vorhanden sind
-                      rows.push({
-                          name: wp.name,
-                          displayName: `${wp.name} (Nicht zugewiesen)`,
-                          timeslotId: '__unassigned__',
-                          timeslotLabel: 'Nicht zugewiesen',
-                          isTimeslotRow: true,
-                          isTimeslotGroupHeader: false,
-                          isUnassignedRow: true,
-                          parentWorkplace: wp.name
-                      });
-                      
-                      // Dann: Eine Zeile pro Timeslot (werden nur angezeigt wenn ausgeklappt)
-                      for (const ts of wpTimeslots) {
-                          rows.push({
-                              name: wp.name,
-                              displayName: `${wp.name} (${ts.label})`,
-                              timeslotId: ts.id,
-                              timeslotLabel: ts.label,
-                              isTimeslotRow: true,
-                              isTimeslotGroupHeader: false,
-                              startTime: ts.start_time,
-                              endTime: ts.end_time,
-                              parentWorkplace: wp.name
-                          });
-                      }
                   } else {
                       // Timeslots aktiviert aber noch keine definiert
                       rows.push({ name: wp.name, displayName: wp.name, timeslotId: null, isTimeslotRow: false, isTimeslotGroupHeader: false });
@@ -1355,7 +1229,7 @@ export default function ScheduleBoard() {
       }
 
       return result;
-  }, [workplaces, workplaceTimeslots, allShifts, previewShifts, getSectionOrder, systemSettings, crossTenantWorkplaces]);
+    }, [workplaces, workplaceTimeslotsByWorkplaceId, allShifts, previewShifts, getSectionOrder, systemSettings, crossTenantWorkplaces]);
 
     const availableSectionTabs = useMemo(() => {
         const knownTitles = new Set(allSections.map(s => s.title));
@@ -2398,15 +2272,67 @@ export default function ScheduleBoard() {
             return map;
         }, [currentWeekShifts]);
 
-        const unassignedShiftPositions = useMemo(() => new Set(
-            currentWeekShifts
-                .filter((shift) => !shift.timeslot_id)
-                .map((shift) => shift.position)
-        ), [currentWeekShifts]);
-
         const doctorById = useMemo(() => new Map(doctors.map((doctor) => [doctor.id, doctor])), [doctors]);
 
         const workplaceByName = useMemo(() => new Map(workplaces.map((workplace) => [workplace.name, workplace])), [workplaces]);
+
+    const workplaceTimeslotsByWorkplaceId = useMemo(() => {
+        const map = new Map();
+
+        workplaceTimeslots.forEach((timeslot) => {
+            const key = timeslot.workplace_id;
+            const list = map.get(key) || [];
+            list.push(timeslot);
+            map.set(key, list);
+        });
+
+        map.forEach((list, key) => {
+            map.set(key, [...list].sort((a, b) => (a.order || 0) - (b.order || 0)));
+        });
+
+        return map;
+    }, [workplaceTimeslots]);
+
+    const getPositionTimeslotOptions = (positionName) => {
+        const workplace = workplaceByName.get(positionName);
+        if (!workplace?.timeslots_enabled) return [];
+
+        return (workplaceTimeslotsByWorkplaceId.get(workplace.id) || []).map((timeslot) => ({
+            ...timeslot,
+            timeRange: formatTimeslotTimeRange(timeslot.start_time, timeslot.end_time),
+        }));
+    };
+
+    const resolveTimeslotSelection = ({ positionName, dateStr = null, requestedTimeslotId = null, onResolved }) => {
+        const normalizedTimeslotId = requestedTimeslotId === '__unassigned__' ? null : requestedTimeslotId;
+        if (normalizedTimeslotId) {
+            onResolved(normalizedTimeslotId);
+            return true;
+        }
+
+        const options = getPositionTimeslotOptions(positionName);
+        if (options.length === 0) {
+            onResolved(null);
+            return true;
+        }
+
+        if (options.length === 1) {
+            onResolved(options[0].id);
+            return true;
+        }
+
+        const formattedDate = dateStr ? format(new Date(`${dateStr}T00:00:00`), 'dd.MM.yyyy') : null;
+        pendingTimeslotSelectionRef.current = onResolved;
+        setTimeslotSelectionDialog({
+            open: true,
+            workplaceName: positionName,
+            description: formattedDate
+                ? `${positionName} am ${formattedDate} hat mehrere Zeitfenster.`
+                : `${positionName} hat mehrere Zeitfenster.`,
+            options,
+        });
+        return false;
+    };
 
     const availabilityBlockingDoctorIdsByDate = useMemo(() => getAvailabilityBlockingDoctorIdsByDate({
             localShifts: currentWeekShifts,
@@ -2602,7 +2528,6 @@ export default function ScheduleBoard() {
     const { draggableId } = before;
         const normalizedDraggableId = normalizeDraggableId(draggableId);
         if (!normalizedDraggableId) return;
-                const isAvailableDoctorDrag = normalizedDraggableId.startsWith('available-doc-');
 
     let docId = null;
     let shiftId = null;
@@ -2618,20 +2543,9 @@ export default function ScheduleBoard() {
             docId = shift.doctor_id;
         }
     }
-        // Use flushSync to ensure DOM updates before measurement.
-        // Only collapsed timeslot groups are expanded here so their nested droppables
-        // are measurable during drag; collapsed sections must remain untouched.
     flushSync(() => {
       if (docId) setDraggingDoctorId(docId);
       if (shiftId) setDraggingShiftId(shiftId);
-      setCollapsedTimeslotGroups(prev => {
-        if (prev.length > 0) {
-          savedCollapsedGroupsRef.current = prev;
-                    if (isAvailableDoctorDrag) setIsAvailableTimeslotMeasurementMode(true);
-          return [];
-        }
-        return prev;
-      });
     });
   };
 
@@ -2666,34 +2580,10 @@ export default function ScheduleBoard() {
     }
     };
 
-    const handleDragUpdate = (update) => {
-        // Alle Gruppen sind bereits in onBeforeCapture expandiert.
-        // Hier nur tracken, ob der User über ein spezifisches Zeitfenster hovert,
-        // damit wir es nach dem Drop offen lassen können.
-        const destinationDroppableId = update?.destination?.droppableId;
-        if (destinationDroppableId) {
-            const wpName = getWorkplaceNameFromDroppableId(destinationDroppableId);
-            if (wpName && isSpecificTimeslotDestination(destinationDroppableId, wpName)) {
-                droppedInTimeslotGroupRef.current = wpName;
-            }
-        }
-    };
+    const handleDragUpdate = () => {};
 
   const handleDragEnd = async (result) => {
     setIsDraggingFromGrid(false);
-                setIsAvailableTimeslotMeasurementMode(false);
-        // Gespeicherte Collapsed-Gruppen wiederherstellen
-        const saved = savedCollapsedGroupsRef.current;
-        if (saved) {
-            // Prüfen ob in ein konkretes Zeitfenster gedroppt wurde → Gruppe offen lassen
-            const droppedWp = result.destination
-                ? getWorkplaceNameFromDroppableId(result.destination.droppableId)
-                : null;
-            const keepOpen = droppedWp && isSpecificTimeslotDestination(result.destination?.droppableId, droppedWp);
-            setCollapsedTimeslotGroups(keepOpen ? saved.filter(n => n !== droppedWp) : saved);
-            savedCollapsedGroupsRef.current = null;
-        }
-        droppedInTimeslotGroupRef.current = null;
     console.log('DEBUG: Drag Operation Ended', { 
         draggableId: result.draggableId,
         source: result.source,
@@ -2746,7 +2636,20 @@ export default function ScheduleBoard() {
         const destParts = destinationDroppableId.split('__');
         const newDateStr = destParts[0];
         const newPosition = destParts[1];
+        const rawNewTimeslotId = destParts[2] || null;
         if (!newDateStr || !newPosition) return;
+
+        let resolvedPreviewTimeslotId = null;
+        if (!resolveTimeslotSelection({
+            positionName: newPosition,
+            dateStr: newDateStr,
+            requestedTimeslotId: rawNewTimeslotId,
+            onResolved: (timeslotId) => {
+                resolvedPreviewTimeslotId = timeslotId;
+            },
+        })) {
+            return;
+        }
 
         // Validate: workplace active on that date?
         const absencePositions = ["Frei", "Krank", "Urlaub", "Dienstreise", "Nicht verfügbar"];
@@ -2767,13 +2670,20 @@ export default function ScheduleBoard() {
             }
         }
 
+        const previewBlock = getScheduleBlock(newDateStr, newPosition, resolvedPreviewTimeslotId);
+        if (previewBlock) {
+            toast.error('Zelle gesperrt' + (previewBlock.reason ? `: ${previewBlock.reason}` : ''));
+            return;
+        }
+
         // Check duplicate: is this doctor already on this position+date in preview or DB?
         const allMerged = [...(currentWeekShifts || [])];
         const duplicate = allMerged.find(s => 
             s.id !== shiftId &&
             s.date === newDateStr && 
             s.position === newPosition && 
-            s.doctor_id === previewShift.doctor_id
+            s.doctor_id === previewShift.doctor_id &&
+            (resolvedPreviewTimeslotId ? s.timeslot_id === resolvedPreviewTimeslotId : !s.timeslot_id)
         );
         if (duplicate) {
             toast.error('Arzt ist dort bereits eingeteilt.');
@@ -2783,7 +2693,13 @@ export default function ScheduleBoard() {
         // Apply the move in previewShifts state
         let updated = previewShifts.map(s => {
             if (s.id !== shiftId) return s;
-            return { ...s, date: newDateStr, position: newPosition };
+            const nextShift = { ...s, date: newDateStr, position: newPosition };
+            if (resolvedPreviewTimeslotId) {
+                nextShift.timeslot_id = resolvedPreviewTimeslotId;
+            } else {
+                delete nextShift.timeslot_id;
+            }
+            return nextShift;
         });
 
         // Auto-Frei: if old position was auto-off → remove old auto-frei
@@ -2834,7 +2750,7 @@ export default function ScheduleBoard() {
       };
 
       // Helper to find occupying shift for services or demos (for replacement)
-      const findOccupyingShift = (dateStr, position, ignoreShiftId = null) => {
+      const findOccupyingShift = (dateStr, position, ignoreShiftId = null, timeslotId = null) => {
           const targetWorkplace = workplaces.find(w => w.name === position);
           if (!targetWorkplace) return null;
 
@@ -2844,11 +2760,18 @@ export default function ScheduleBoard() {
 
           if (allowsMultiple) return null;
 
-          return currentWeekShifts.find(s => 
-               s.date === dateStr && 
-               s.position === position && 
-               s.id !== ignoreShiftId
-          );
+          return currentWeekShifts.find((shift) => {
+               if (shift.date !== dateStr || shift.position !== position || shift.id === ignoreShiftId) {
+                   return false;
+               }
+
+               if (targetWorkplace.timeslots_enabled) {
+                   if (timeslotId) return shift.timeslot_id === timeslotId;
+                   return !shift.timeslot_id;
+               }
+
+               return true;
+          });
       };
 
       // Helper to cleanup other shifts when becoming absent
@@ -2897,21 +2820,11 @@ export default function ScheduleBoard() {
 
     // Handle Drop on Row Header (Assign Mo-Fr)
     if (destinationDroppableId.startsWith('rowHeader__')) {
-        // Format: rowHeader__position oder rowHeader__position__timeslotId oder rowHeader__position__allTimeslots__
+        // Format: rowHeader__position oder rowHeader__position__timeslotId
         const headerParts = destinationDroppableId.replace('rowHeader__', '').split('__');
         const rowName = headerParts[0];
         const rawHeaderTimeslotId = headerParts[1] || null;
-        // Special case: __allTimeslots__ means collapsed timeslot group header
-        const isAllTimeslots = rawHeaderTimeslotId === 'allTimeslots';
-        const rowHeaderTimeslotId = isAllTimeslots ? null : rawHeaderTimeslotId;
-
-        // Auto-expand collapsed timeslot group instead of assigning to all
-        if (isAllTimeslots) {
-            if (expandTimeslotGroup(rowName)) {
-                toast.info('Zeitfenster aufgeklappt – bitte Mitarbeiter in das gewünschte Zeitfenster ziehen.');
-            }
-            return;
-        }
+        const rowHeaderTimeslotId = rawHeaderTimeslotId;
 
         let doctorId = null;
 
@@ -2926,60 +2839,52 @@ export default function ScheduleBoard() {
 
         if (!doctorId) return;
 
-        // Get all days of the current week (Mo-So) and filter by active_days
-        const monday = startOfWeek(currentDate, { weekStartsOn: 1 });
-        const allWeekDays = [0, 1, 2, 3, 4, 5, 6].map(offset => addDays(monday, offset)); // Mo-So
-        const daysToAssign = allWeekDays.filter(day => isWorkplaceActiveOnDate(rowName, format(day, 'yyyy-MM-dd')));
+        const assignWeekdaysToTimeslot = async (resolvedTimeslotId) => {
+            const monday = startOfWeek(currentDate, { weekStartsOn: 1 });
+            const allWeekDays = [0, 1, 2, 3, 4, 5, 6].map(offset => addDays(monday, offset));
+            const daysToAssign = allWeekDays.filter(day => isWorkplaceActiveOnDate(rowName, format(day, 'yyyy-MM-dd')));
 
-        const toCreate = [];
-        const toDelete = [];
+            const toCreate = [];
+            const toDelete = [];
 
-        let successCount = 0;
-        let blockedCount = 0;
+            let successCount = 0;
+            let blockedCount = 0;
 
-        for (const day of daysToAssign) {
-            const dateStr = format(day, 'yyyy-MM-dd');
+            for (const day of daysToAssign) {
+                const dateStr = format(day, 'yyyy-MM-dd');
 
-            // Check ScheduleBlock
-            if (getScheduleBlock(dateStr, rowName, rowHeaderTimeslotId)) {
-                blockedCount++;
-                continue;
-            }
-
-            // Check conflicts (using isVoice=true for silent/toast mode to prevent 5 alerts)
-            // Note: checkConflicts is defined in outer scope (ScheduleBoard)
-            if (checkConflicts(doctorId, dateStr, rowName, true)) { 
-                blockedCount++;
-                continue;
-            }
-
-            // Check limits
-            const limitWarning = checkLimits(doctorId, dateStr, rowName);
-            if (limitWarning) {
-                toast.warning(`Limit Warnung (${format(day, 'dd.MM')}): ${limitWarning}`);
-            }
-
-            // Cleanups for target day (similar to single drop)
-            if (absencePositions.includes(rowName)) {
-                const staffingWarn = checkStaffing(dateStr, doctorId);
-                if (staffingWarn) toast.warning(staffingWarn);
-
-                 const others = currentWeekShifts.filter(s => s.doctor_id === doctorId && s.date === dateStr);
-                 others.forEach(s => toDelete.push(s.id));
-            } else {
-                const occupying = findOccupyingShift(dateStr, rowName);
-                if (occupying) {
-                     if (isAutoOffPosition(occupying.position)) {
-                         // cleanupAutoFrei omitted for batch simplicity or handled later
-                     }
-                     toDelete.push(occupying.id);
+                if (getScheduleBlock(dateStr, rowName, resolvedTimeslotId)) {
+                    blockedCount++;
+                    continue;
                 }
-            }
 
-            // Prepare Assignment - Duplikat-Prüfung mit Timeslot-Berücksichtigung
-            {
-                const tsId = rowHeaderTimeslotId; // einzelner Timeslot oder null
-                const effectiveTsId = tsId === '__unassigned__' ? null : tsId;
+                if (checkConflicts(doctorId, dateStr, rowName, true)) {
+                    blockedCount++;
+                    continue;
+                }
+
+                const limitWarning = checkLimits(doctorId, dateStr, rowName);
+                if (limitWarning) {
+                    toast.warning(`Limit Warnung (${format(day, 'dd.MM')}): ${limitWarning}`);
+                }
+
+                if (absencePositions.includes(rowName)) {
+                    const staffingWarn = checkStaffing(dateStr, doctorId);
+                    if (staffingWarn) toast.warning(staffingWarn);
+
+                    const others = currentWeekShifts.filter(s => s.doctor_id === doctorId && s.date === dateStr);
+                    others.forEach(s => toDelete.push(s.id));
+                } else {
+                    const occupying = findOccupyingShift(dateStr, rowName, null, resolvedTimeslotId);
+                    if (occupying) {
+                        if (isAutoOffPosition(occupying.position)) {
+                            // cleanupAutoFrei omitted for batch simplicity or handled later
+                        }
+                        toDelete.push(occupying.id);
+                    }
+                }
+
+                const effectiveTsId = resolvedTimeslotId === '__unassigned__' ? null : resolvedTimeslotId;
                 
                 const existingShift = currentWeekShifts.find(s => {
                     if (s.date !== dateStr || s.position !== rowName || s.doctor_id !== doctorId) return false;
@@ -3015,22 +2920,34 @@ export default function ScheduleBoard() {
                 toCreate.push(newShiftData);
                 successCount++;
             }
-        }
 
-        // Execute Batch
-        if (toDelete.length > 0) {
-            await bulkDeleteMutation.mutateAsync(toDelete);
-        }
-        if (toCreate.length > 0) {
-            const created = await db.ShiftEntry.bulkCreate(toCreate);
-            if (created && Array.isArray(created)) {
-                setUndoStack(prev => [...prev, { type: 'BULK_DELETE', ids: created.map(c => c.id) }]);
+            if (toDelete.length > 0) {
+                await bulkDeleteMutation.mutateAsync(toDelete);
             }
-            setTimeout(() => queryClient.invalidateQueries(['shifts', fetchRange.start, fetchRange.end]), 100);
+            if (toCreate.length > 0) {
+                const created = await db.ShiftEntry.bulkCreate(toCreate);
+                if (created && Array.isArray(created)) {
+                    setUndoStack(prev => [...prev, { type: 'BULK_DELETE', ids: created.map(c => c.id) }]);
+                }
+                setTimeout(() => queryClient.invalidateQueries(['shifts', fetchRange.start, fetchRange.end]), 100);
+            }
+
+            if (successCount > 0) toast.success(`${successCount} Tage zugewiesen (Mo-Fr)`);
+            if (blockedCount > 0) toast.warning(`${blockedCount} Tage übersprungen wegen Konflikten`);
+        };
+
+        let resolvedHeaderTimeslotId = null;
+        if (!resolveTimeslotSelection({
+            positionName: rowName,
+            requestedTimeslotId: rowHeaderTimeslotId,
+            onResolved: (timeslotId) => {
+                resolvedHeaderTimeslotId = timeslotId;
+            },
+        })) {
+            return;
         }
 
-        if (successCount > 0) toast.success(`${successCount} Tage zugewiesen (Mo-Fr)`);
-        if (blockedCount > 0) toast.warning(`${blockedCount} Tage übersprungen wegen Konflikten`);
+        await assignWeekdaysToTimeslot(resolvedHeaderTimeslotId);
 
         return;
     }
@@ -3107,24 +3024,43 @@ export default function ScheduleBoard() {
             doctorId = parseAvailableDoctorId(normalizedDraggableId);
         }
 
+        const dropParts = destinationDroppableId.split('__');
+        const dateStr = dropParts[0];
+        const position = dropParts[1];
+        const rawTimeslotId = dropParts[2] || null;
+        if (!dateStr || !position) return;
+
         // PREVIEW MODE: Add to previewShifts instead of creating DB entry
         if (previewShifts) {
-            const dropParts = destinationDroppableId.split('__');
-            const dateStr = dropParts[0];
-            const position = dropParts[1];
-            if (!dateStr || !position) return;
+            let resolvedPreviewTimeslotId = null;
+            if (!resolveTimeslotSelection({
+                positionName: position,
+                dateStr,
+                requestedTimeslotId: rawTimeslotId,
+                onResolved: (timeslotId) => {
+                    resolvedPreviewTimeslotId = timeslotId;
+                },
+            })) {
+                return;
+            }
 
-            // Check duplicate
-            const allMerged = [...(currentWeekShifts || [])];
-            const duplicate = allMerged.find(s => s.date === dateStr && s.position === position && s.doctor_id === doctorId);
+            const duplicate = currentWeekShifts.find((shift) => {
+                if (shift.date !== dateStr || shift.position !== position || shift.doctor_id !== doctorId) return false;
+                if (resolvedPreviewTimeslotId) return shift.timeslot_id === resolvedPreviewTimeslotId;
+                return !shift.timeslot_id;
+            });
             if (duplicate) {
                 toast.error('Arzt ist dort bereits eingeteilt.');
                 return;
             }
 
             const newId = `preview-add-${Date.now()}`;
-            let updatedPreviews = [...previewShifts, { id: newId, date: dateStr, position, doctor_id: doctorId, isPreview: true }];
-            // Auto-Frei: if added to an auto-off position → add auto-frei for the direct eligible next day
+            const newPreviewShift = { id: newId, date: dateStr, position, doctor_id: doctorId, isPreview: true };
+            if (resolvedPreviewTimeslotId) {
+                newPreviewShift.timeslot_id = resolvedPreviewTimeslotId;
+            }
+
+            let updatedPreviews = [...previewShifts, newPreviewShift];
             if (isAutoOffPosition(position)) {
                 updatedPreviews = addPreviewAutoFrei(doctorId, dateStr, position, updatedPreviews);
             }
@@ -3133,41 +3069,19 @@ export default function ScheduleBoard() {
             return;
         }
 
-        // Format: date__position oder date__position__timeslotId oder date__position__allTimeslots__
-        const dropParts = destinationDroppableId.split('__');
-        const dateStr = dropParts[0];
-        const position = dropParts[1];
-        const rawTimeslotId = dropParts[2] || null;
-        // Special case: __allTimeslots__ means the group header was collapsed
-        // → auto-expand the group so the user can pick a specific timeslot
-        const isAllTimeslots = rawTimeslotId === 'allTimeslots';
-        if (isAllTimeslots) {
-            // Expand the collapsed timeslot group
-            if (expandTimeslotGroup(position)) {
-                toast.info(`Bitte Zeitfenster wählen: "${position}" wurde aufgeklappt.`);
-            }
+        let resolvedCreateTimeslotId = null;
+        if (!resolveTimeslotSelection({
+            positionName: position,
+            dateStr,
+            requestedTimeslotId: rawTimeslotId,
+            onResolved: (timeslotId) => {
+                resolvedCreateTimeslotId = timeslotId;
+            },
+        })) {
             return;
         }
-        // '__unassigned__' bedeutet explizit kein Timeslot
-        let timeslotId = rawTimeslotId === '__unassigned__' ? null : rawTimeslotId;
 
-        // Bei allTimeslots haben wir bereits oben returned (auto-expand)
-        const workplace = workplaces.find(w => w.name === position);
-        let timeslotsToAssign = null;
-
-        // Auto-Timeslot: Wenn kein Timeslot angegeben, aber Workplace nur einen Timeslot hat,
-        // automatisch diesen verwenden
-        if (!timeslotId) {
-            if (workplace?.timeslots_enabled) {
-                const wpTimeslots = workplaceTimeslots
-                    .filter(t => t.workplace_id === workplace.id)
-                    .sort((a, b) => (a.order || 0) - (b.order || 0));
-                if (wpTimeslots.length === 1) {
-                    timeslotId = wpTimeslots[0].id;
-                    console.log('Auto-assigning single timeslot:', timeslotId);
-                }
-            }
-        }
+        const timeslotId = resolvedCreateTimeslotId;
 
         console.log('Dropping Doctor:', doctorId, 'to', dateStr, position, 'timeslotId:', timeslotId);
 
@@ -3238,7 +3152,7 @@ export default function ScheduleBoard() {
                  }
              }
 
-             const occupyingShift = findOccupyingShift(dateStr, position);
+             const occupyingShift = findOccupyingShift(dateStr, position, null, timeslotId);
 
              // Cell-Lock: prevent duplicate creates from rapid drag-drops
              // Only for positions that don't allow multiple assignments
@@ -3262,8 +3176,7 @@ export default function ScheduleBoard() {
                  // '__unassigned__' = Zeile für Shifts ohne Timeslot
                  const shiftsToCreate = [];
                  
-                 // Bei allTimeslots: Für jeden Timeslot eine Schicht erstellen
-                 const slotsToProcess = timeslotsToAssign || [timeslotId];
+                 const slotsToProcess = [timeslotId];
                  
                  for (const tsId of slotsToProcess) {
                      const effectiveTsId = tsId === '__unassigned__' ? null : tsId;
@@ -3363,22 +3276,16 @@ export default function ScheduleBoard() {
         const newDateStr = destParts[0];
         const newPosition = destParts[1];
         const rawNewTimeslotId = destParts[2] || null;
-        // '__unassigned__' bedeutet explizit kein Timeslot
-        let newTimeslotId = rawNewTimeslotId === '__unassigned__' ? null : rawNewTimeslotId;
-        
-        // Auto-Timeslot: Wenn kein Timeslot angegeben, aber Workplace nur einen Timeslot hat,
-        // automatisch diesen verwenden
-        if (!newTimeslotId) {
-            const workplace = workplaces.find(w => w.name === newPosition);
-            if (workplace?.timeslots_enabled) {
-                const wpTimeslots = workplaceTimeslots
-                    .filter(t => t.workplace_id === workplace.id)
-                    .sort((a, b) => (a.order || 0) - (b.order || 0));
-                if (wpTimeslots.length === 1) {
-                    newTimeslotId = wpTimeslots[0].id;
-                    console.log('Auto-assigning single timeslot for move:', newTimeslotId);
-                }
-            }
+        let newTimeslotId = null;
+        if (!resolveTimeslotSelection({
+            positionName: newPosition,
+            dateStr: newDateStr,
+            requestedTimeslotId: rawNewTimeslotId,
+            onResolved: (timeslotId) => {
+                newTimeslotId = timeslotId;
+            },
+        })) {
+            return;
         }
         
         // Check active_days for grid-to-grid moves to different position/date
@@ -3398,9 +3305,16 @@ export default function ScheduleBoard() {
             if (source.index === destination.index) return;
 
             // Bei Reordering innerhalb derselben Zelle: auch Timeslot-ID berücksichtigen
+            const targetWorkplace = workplaceByName.get(newPosition);
+            const targetAllTimeslotIds = targetWorkplace?.timeslots_enabled
+                ? (workplaceTimeslotsByWorkplaceId.get(targetWorkplace.id) || []).map((timeslot) => timeslot.id)
+                : [];
             const cellShifts = currentWeekShifts
                 .filter(s => {
                     if (s.date !== newDateStr || s.position !== newPosition) return false;
+                    if (!newTimeslotId && targetAllTimeslotIds.length > 1) {
+                        return targetAllTimeslotIds.includes(s.timeslot_id) || !s.timeslot_id;
+                    }
                     if (newTimeslotId) return s.timeslot_id === newTimeslotId;
                     return !s.timeslot_id;
                 })
@@ -3469,7 +3383,7 @@ export default function ScheduleBoard() {
                  const limitWarning = checkLimits(shift.doctor_id, newDateStr, newPosition);
                  if (limitWarning) toast.warning(limitWarning);
 
-                 const occupyingShift = findOccupyingShift(newDateStr, newPosition);
+                 const occupyingShift = findOccupyingShift(newDateStr, newPosition, null, newTimeslotId);
                  if (occupyingShift) {
                      if (isAutoOffPosition(occupyingShift.position)) {
                          cleanupAutoFrei(occupyingShift.doctor_id, occupyingShift.date, occupyingShift.position);
@@ -3573,7 +3487,7 @@ export default function ScheduleBoard() {
              const limitWarning = checkLimits(shift.doctor_id, newDateStr, newPosition);
              if (limitWarning) toast.warning(limitWarning);
 
-             const occupyingShift = findOccupyingShift(newDateStr, newPosition, shiftId);
+             const occupyingShift = findOccupyingShift(newDateStr, newPosition, shiftId, newTimeslotId);
              if (occupyingShift) {
                  deleteShiftWithCleanup(occupyingShift);
              }
@@ -4004,14 +3918,7 @@ export default function ScheduleBoard() {
         if (!doctor) return null;
         const compactLabel = getDoctorChipLabel(doctor);
         
-        // Timeslot-Badge für eingeklappte Gruppen: Endzeit, bei Teilzeit ggf. gekappt
-        let shiftTimeslotLabel = null;
-        let shiftTimeslotLabelTone = 'default';
-        if (allTimeslotIds && allTimeslotIds.length > 0 && shift.timeslot_id) {
-            const badgeInfo = getShiftTimeslotBadge(shift, doctor, workplaceTimeslots, workTimeModelMap);
-            shiftTimeslotLabel = badgeInfo.label;
-            shiftTimeslotLabelTone = badgeInfo.tone;
-        }
+        const shiftTimeLabel = getShiftTimeRangeLabel(shift, workplaceTimeslots);
         const lateRotationTooltip = lateRotationIndicatorByDoctorDay.get(`${doctor.id}__${dateStr}`) || null;
         
         // Qualifikations-Indikator
@@ -4080,15 +3987,15 @@ export default function ScheduleBoard() {
                     qualificationStatus={qualificationStatus}
                     fairnessInfo={shift.isPreview && !isMonthView ? getFairnessInfo(shift) : null}
                     wishMarker={getShiftWishMarker(shift)}
-                    timeslotLabel={shiftTimeslotLabel}
-                    timeslotLabelTone={shiftTimeslotLabelTone}
+                    timeslotLabel={null}
+                    timeLabelOverride={shiftTimeLabel}
                     showLateStartIndicator={Boolean(lateRotationTooltip)}
                     lateStartTooltip={lateRotationTooltip}
                 />
             </div>
         );
     });
-    }, [currentWeekShiftLookup, doctorById, draggingShiftId, isCtrlPressed, shiftBoxSize, effectiveGridFontSize, isReadOnly, user, highlightMyName, showInitialsOnly, colorSettings, isLoadingColors, getRoleColor, workplaceByName, workplaceTimeslots, getDoctorQualIds, getWpRequiredQualIds, getWpExcludedQualIds, getFairnessInfo, getShiftWishMarker, isEmbeddedSchedule, isSplitViewEnabled, isMonthView, getDoctorChipLabel, workTimeModelMap, lateRotationIndicatorByDoctorDay]);
+    }, [currentWeekShiftLookup, doctorById, draggingShiftId, isCtrlPressed, shiftBoxSize, effectiveGridFontSize, isReadOnly, user, highlightMyName, showInitialsOnly, colorSettings, isLoadingColors, getRoleColor, workplaceByName, workplaceTimeslots, getDoctorQualIds, getWpRequiredQualIds, getWpExcludedQualIds, getFairnessInfo, getShiftWishMarker, isEmbeddedSchedule, isSplitViewEnabled, isMonthView, getDoctorChipLabel, lateRotationIndicatorByDoctorDay]);
 
   // Render clone for shift drags from cells - matches sidebar behavior
   const renderShiftClone = useMemo(() => (provided, snapshot, rubric) => {
@@ -4221,17 +4128,7 @@ export default function ScheduleBoard() {
                           typeof r === 'string' ? { name: r, displayName: r, timeslotId: null, isTimeslotRow: false, isTimeslotGroupHeader: false } : r
                       );
 
-                      const visibleRows = normalizedRows.filter(r => {
-                          if (hiddenRows.includes(r.name)) return false;
-                          if (r.isTimeslotRow && collapsedTimeslotGroups.includes(r.name)) return false;
-                          if (r.isUnassignedRow) {
-                              const hasUnassignedShifts = currentWeekShifts.some(s =>
-                                  s.position === r.name && !s.timeslot_id
-                              );
-                              if (!hasUnassignedShifts) return false;
-                          }
-                          return true;
-                      });
+                      const visibleRows = normalizedRows.filter(r => !hiddenRows.includes(r.name));
                       if (visibleRows.length === 0) return null;
 
                       const isCollapsed = collapsedSections.includes(section.title);
@@ -4257,13 +4154,10 @@ export default function ScheduleBoard() {
                                   const rowDisplayName = rowObj.displayName || rowName;
                                   const rowTimeslotId = rowObj.timeslotId;
                                   const isGroupHeader = rowObj.isTimeslotGroupHeader;
-                                  const isGroupCollapsed = collapsedTimeslotGroups.includes(rowName);
                                   const rowStyle = getRowStyle(rowName, customStyle);
-                                  const useLightweightTimeslotTarget = isAvailableTimeslotMeasurementMode && rowObj.isTimeslotRow && !rowObj.isUnassignedRow;
+                                  const useLightweightTimeslotTarget = false;
 
-                                  const rawHeaderDroppableId = isGroupHeader
-                                      ? `rowHeader__${rowName}__allTimeslots__`
-                                      : `rowHeader__${rowName}${rowTimeslotId ? '__' + rowTimeslotId : ''}`;
+                                  const rawHeaderDroppableId = `rowHeader__${rowName}${rowTimeslotId ? '__' + rowTimeslotId : ''}`;
                                   const headerDroppableId = withPanelPrefix(rawHeaderDroppableId, SPLIT_PANEL_PREFIX);
                                   const rowLabelPresentation = getRowLabelPresentation(rowDisplayName, isMonthView);
 
@@ -4276,20 +4170,13 @@ export default function ScheduleBoard() {
                                                       {...provided.droppableProps}
                                                       className={`p-2 text-sm font-medium border-r border-slate-200 flex items-center justify-between transition-colors ${!customStyle ? section.headerColor : ''} ${snapshot.isDraggingOver ? 'ring-2 ring-inset ring-indigo-400 bg-indigo-50' : ''} ${isGroupHeader ? 'cursor-pointer' : ''}`}
                                                       style={customStyle ? customStyle.header : {}}
-                                                      onClick={isGroupHeader ? () => toggleTimeslotGroup(rowName) : undefined}
+                                                      onClick={undefined}
                                                   >
                                                       <div className="flex flex-col min-w-0">
                                                           <span className="flex min-w-0 items-center gap-1" title={rowDisplayName}>
-                                                              {isGroupHeader && (
-                                                                  <span className="text-slate-500">
-                                                                      {isGroupCollapsed ? <ChevronRight className="w-3 h-3 inline" /> : <ChevronDown className="w-3 h-3 inline" />}
-                                                                  </span>
-                                                              )}
-                                                              {rowObj.isTimeslotRow && !rowObj.isUnassignedRow && <span className="text-slate-400 mr-1">↳</span>}
-                                                              {rowObj.isUnassignedRow && <span className="text-amber-500 mr-1">⚠</span>}
                                                               {rowObj.isCrossTenantRow && <Globe2 className="w-3 h-3 mr-1 text-indigo-500" />}
                                                               <span
-                                                                  className={`${rowLabelPresentation.className} ${rowObj.isUnassignedRow ? 'text-amber-700' : ''}`}
+                                                                  className={rowLabelPresentation.className}
                                                                   style={rowLabelPresentation.style}
                                                               >
                                                                   {rowDisplayName}
@@ -4298,6 +4185,11 @@ export default function ScheduleBoard() {
                                                           {rowObj.isAlwaysVisibleRow && rowObj.sourceSectionTitle && (
                                                               <span className="text-[10px] font-normal text-indigo-600">
                                                                   aus {getSectionName(rowObj.sourceSectionTitle)}
+                                                              </span>
+                                                          )}
+                                                          {rowObj.timeslotSummary && (
+                                                              <span className="text-[10px] font-normal text-slate-500 line-clamp-2">
+                                                                  {rowObj.timeslotSummary}
                                                               </span>
                                                           )}
                                                       </div>
@@ -4310,11 +4202,9 @@ export default function ScheduleBoard() {
                                               const isWeekendDay = [0, 6].includes(day.getDay());
                                               const isToday = isSameDay(day, new Date());
                                               const dateStr = format(day, 'yyyy-MM-dd');
-                                              const rawCellId = isGroupHeader
-                                                  ? `${dateStr}__${rowName}__allTimeslots__`
-                                                  : rowTimeslotId
-                                                      ? `${dateStr}__${rowName}__${rowTimeslotId}`
-                                                      : `${dateStr}__${rowName}`;
+                                              const rawCellId = rowTimeslotId
+                                                  ? `${dateStr}__${rowName}__${rowTimeslotId}`
+                                                  : `${dateStr}__${rowName}`;
                                               const cellId = withPanelPrefix(rawCellId, SPLIT_PANEL_PREFIX);
 
                                               let isDisabled = false;
@@ -4426,7 +4316,7 @@ export default function ScheduleBoard() {
                                                                   rowName,
                                                                   ['Dienste', 'Demonstrationen & Konsile'].includes(section.title),
                                                                   rowTimeslotId,
-                                                                  isGroupHeader && isGroupCollapsed ? rowObj.allTimeslotIds : null,
+                                                                  rowObj.allTimeslotIds || null,
                                                                   rowObj.singleTimeslotId || null,
                                                                   SPLIT_DRAG_PREFIX,
                                                                   cellWidth
@@ -5026,14 +4916,9 @@ export default function ScheduleBoard() {
                     typeof r === 'string' ? { name: r, displayName: r, timeslotId: null, isTimeslotRow: false, isTimeslotGroupHeader: false } : r
                 );
                 
-                // Filter: Versteckte Zeilen ausblenden + Timeslot-Zeilen ausblenden wenn Gruppe eingeklappt
-                // + "Nicht zugewiesen" Zeilen ausblenden wenn keine Altdaten vorhanden
+                // Filter: Versteckte Zeilen ausblenden
                 const visibleRows = normalizedRows.filter(r => {
                     if (hiddenRows.includes(r.name)) return false;
-                    if (r.isTimeslotRow && collapsedTimeslotGroups.includes(r.name)) return false;
-                    if (r.isUnassignedRow) {
-                        if (!unassignedShiftPositions.has(r.name)) return false;
-                    }
                     return true;
                 });
                 if (visibleRows.length === 0) return null;
@@ -5077,17 +4962,13 @@ export default function ScheduleBoard() {
                         const rowDisplayName = rowObj.displayName || rowName;
                         const rowTimeslotId = rowObj.timeslotId;
                         const isGroupHeader = rowObj.isTimeslotGroupHeader;
-                        const isGroupCollapsed = collapsedTimeslotGroups.includes(rowName);
                         const rowStyle = getRowStyle(rowName, customStyle);
                         const rowWorkplace = workplaceByName.get(rowName);
-                        const useLightweightTimeslotTarget = isAvailableTimeslotMeasurementMode && rowObj.isTimeslotRow && !rowObj.isUnassignedRow;
+                        const useLightweightTimeslotTarget = false;
                         const expandedRowLabel = getExpandedTimeslotRowLabel(rowObj, rowDisplayName);
                         const rowLabelPresentation = getRowLabelPresentation(expandedRowLabel, isMonthView);
                         
-                        // Gruppen-Header: droppableId mit spezieller Markierung "__allTimeslots__"
-                        const headerDroppableId = isGroupHeader 
-                            ? `rowHeader__${rowName}__allTimeslots__`
-                            : `rowHeader__${rowName}${rowTimeslotId ? '__' + rowTimeslotId : ''}`;
+                        const headerDroppableId = `rowHeader__${rowName}${rowTimeslotId ? '__' + rowTimeslotId : ''}`;
                         
                         return (
                         <div key={`${sIdx}-${rowDisplayName}-${rowTimeslotId || 'full'}`} className={`grid border-b border-slate-200 ${(draggingDoctorId || draggingShiftId) ? '' : 'hover:bg-slate-50/50'} transition-colors group`} style={matrixGridStyle}>
@@ -5099,20 +4980,13 @@ export default function ScheduleBoard() {
                                         data-testid={`schedule-row-header-${encodeScheduleTargetId(headerDroppableId)}`}
                                         className={`p-2 text-sm font-medium border-r border-slate-200 flex items-center justify-between transition-colors ${!customStyle ? section.headerColor : ''} ${snapshot.isDraggingOver ? 'ring-2 ring-inset ring-indigo-400 bg-indigo-50' : ''} ${isGroupHeader ? 'cursor-pointer' : ''}`}
                                         style={customStyle ? customStyle.header : {}}
-                                        onClick={isGroupHeader ? () => toggleTimeslotGroup(rowName) : undefined}
+                                        onClick={undefined}
                                     >
                                         <div className="flex flex-col min-w-0">
                                             <span className="flex min-w-0 items-center gap-1" title={expandedRowLabel}>
-                                                {isGroupHeader && (
-                                                    <span className="text-slate-500">
-                                                        {isGroupCollapsed ? <ChevronRight className="w-3 h-3 inline" /> : <ChevronDown className="w-3 h-3 inline" />}
-                                                    </span>
-                                                )}
-                                                {rowObj.isTimeslotRow && !rowObj.isUnassignedRow && <span className="text-slate-400 mr-1">↳</span>}
-                                                {rowObj.isUnassignedRow && <span className="text-amber-500 mr-1">⚠</span>}
                                                 {rowObj.isCrossTenantRow && <Globe2 className="w-3 h-3 mr-1 text-indigo-500" />}
                                                 <span
-                                                    className={`${rowLabelPresentation.className} ${rowObj.isUnassignedRow ? 'text-amber-700' : ''}`}
+                                                    className={rowLabelPresentation.className}
                                                     style={rowLabelPresentation.style}
                                                 >
                                                     {expandedRowLabel}
@@ -5126,9 +5000,9 @@ export default function ScheduleBoard() {
                                                     aus {getSectionName(rowObj.sourceSectionTitle)}
                                                 </span>
                                             )}
-                                            {rowObj.isUnassignedRow && (
-                                                <span className="text-[10px] font-normal text-amber-600">
-                                                    Bitte Zeitfenster zuweisen
+                                            {rowObj.timeslotSummary && (
+                                                <span className="text-[10px] font-normal text-slate-500 line-clamp-2">
+                                                    {rowObj.timeslotSummary}
                                                 </span>
                                             )}
                                             {!rowObj.isTimeslotRow && rowWorkplace?.time && (
@@ -5169,12 +5043,9 @@ export default function ScheduleBoard() {
                                 const isToday = isSameDay(day, new Date());
                                 const dateStr = format(day, 'yyyy-MM-dd');
                                 // Unique ID for droppable: date__position oder date__position__timeslotId
-                                // Gruppen-Header: Spezielle Markierung "__allTimeslots__" für Zuweisung zu allen Timeslots
-                                const cellId = isGroupHeader
-                                    ? `${dateStr}__${rowName}__allTimeslots__`
-                                    : rowTimeslotId 
-                                        ? `${dateStr}__${rowName}__${rowTimeslotId}`
-                                        : `${dateStr}__${rowName}`;
+                                const cellId = rowTimeslotId 
+                                    ? `${dateStr}__${rowName}__${rowTimeslotId}`
+                                    : `${dateStr}__${rowName}`;
                                 
                                 // Check if it's a demo row and if it's allowed
                                 let isDisabled = false;
@@ -5327,7 +5198,7 @@ export default function ScheduleBoard() {
                                                     rowName, 
                                                     ["Dienste", "Demonstrationen & Konsile"].includes(section.title), 
                                                     rowTimeslotId,
-                                                    isGroupHeader && isGroupCollapsed ? rowObj.allTimeslotIds : null,
+                                                    rowObj.allTimeslotIds || null,
                                                     rowObj.singleTimeslotId || null,
                                                     '',
                                                     cellWidth
@@ -5359,6 +5230,34 @@ export default function ScheduleBoard() {
           onConfirm={confirmOverride}
           onCancel={cancelOverride}
       />
+
+      <Dialog open={timeslotSelectionDialog.open} onOpenChange={handleTimeslotDialogOpenChange}>
+          <DialogContent className="sm:max-w-md" data-testid="schedule-timeslot-selection-dialog">
+              <DialogHeader>
+                  <DialogTitle>Zeitfenster wählen</DialogTitle>
+                  <DialogDescription>{timeslotSelectionDialog.description}</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-2">
+                  {timeslotSelectionDialog.options.map((timeslot) => (
+                      <button
+                          key={timeslot.id}
+                          type="button"
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-left transition-colors hover:border-indigo-300 hover:bg-indigo-50"
+                          onClick={() => handleTimeslotDialogSelect(timeslot.id)}
+                          data-testid={`schedule-timeslot-option-${timeslot.id}`}
+                      >
+                          <div className="font-medium text-slate-900">{timeslot.label || 'Zeitfenster'}</div>
+                          {timeslot.timeRange && (
+                              <div className="text-sm text-slate-500">{timeslot.timeRange}</div>
+                          )}
+                      </button>
+                  ))}
+              </div>
+              <DialogFooter>
+                  <Button variant="outline" onClick={closeTimeslotSelectionDialog}>Abbrechen</Button>
+              </DialogFooter>
+          </DialogContent>
+      </Dialog>
 
       {/* Schedule Block Context Menu */}
       {blockContextMenu && (
