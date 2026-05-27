@@ -608,6 +608,24 @@ const getInitialCustomTimeslotState = (options = []) => {
     };
 };
 
+const getTimeslotSelectionBounds = (options = []) => {
+    const validOptions = options.filter(
+        (option) => Number.isFinite(option?.slotStartMinutes) && Number.isFinite(option?.slotEndMinutes)
+    );
+
+    if (!validOptions.length) {
+        return {
+            minStartMinutes: null,
+            maxEndMinutes: null,
+        };
+    }
+
+    return {
+        minStartMinutes: Math.min(...validOptions.map((option) => option.slotStartMinutes)),
+        maxEndMinutes: Math.max(...validOptions.map((option) => option.slotEndMinutes)),
+    };
+};
+
 const applyTimeslotSelectionToCreateData = (data, selection) => {
     const normalizedSelection = normalizeTimeslotSelection(selection);
     const nextData = { ...data };
@@ -5490,6 +5508,7 @@ export default function ScheduleBoard() {
               </DialogHeader>
               {(() => {
                   const customizableOptions = timeslotSelectionDialog.options.filter((option) => option.canCustomize);
+                  const globalBounds = getTimeslotSelectionBounds(timeslotSelectionDialog.options);
                   const selectedCustomOption = customizableOptions.find((option) => option.id === timeslotSelectionDialog.customOptionId)
                       || customizableOptions[0]
                       || null;
@@ -5505,12 +5524,14 @@ export default function ScheduleBoard() {
                   const customEndMinutes = selectedCustomOption && customStartMinutes !== null
                       ? customStartMinutes + (selectedCustomOption.effectivePresenceMinutes || 0)
                       : null;
-                  const slotDuration = Math.max(selectedCustomOption?.slotDurationMinutes || 1, 1);
+                  const sliderMinMinutes = globalBounds.minStartMinutes ?? selectedCustomOption?.slotStartMinutes ?? 0;
+                  const sliderMaxMinutes = globalBounds.maxEndMinutes ?? selectedCustomOption?.slotEndMinutes ?? sliderMinMinutes + 1;
+                  const sliderDuration = Math.max(sliderMaxMinutes - sliderMinMinutes, 1);
                   const customLeftPercent = selectedCustomOption && customStartMinutes !== null
-                      ? ((customStartMinutes - selectedCustomOption.slotStartMinutes) / slotDuration) * 100
+                      ? ((customStartMinutes - sliderMinMinutes) / sliderDuration) * 100
                       : 0;
                   const customWidthPercent = selectedCustomOption
-                      ? ((selectedCustomOption.effectivePresenceMinutes || 0) / slotDuration) * 100
+                      ? ((selectedCustomOption.effectivePresenceMinutes || 0) / sliderDuration) * 100
                       : 0;
 
                   return (
@@ -5542,12 +5563,6 @@ export default function ScheduleBoard() {
                                               )}
                                               {timeslot.effectiveTimeRange && timeslot.effectiveTimeRange !== timeslot.timeRange && (
                                                   <div className="text-sm font-medium text-indigo-700">Geplanter Einsatz: {timeslot.effectiveTimeRange}</div>
-                                              )}
-                                              {timeslot.earlyLeaveLabel && (
-                                                  <div className="text-sm font-medium text-amber-800">{timeslot.earlyLeaveLabel}</div>
-                                              )}
-                                              {timeslot.shorterShiftNote && (
-                                                  <div className="text-xs text-amber-700">{timeslot.shorterShiftNote}</div>
                                               )}
                                           </div>
                                           <div className="flex shrink-0 flex-wrap gap-2">
@@ -5606,13 +5621,13 @@ export default function ScheduleBoard() {
                                           />
                                       </div>
                                       <div className="flex justify-between text-[11px] text-slate-500">
-                                          <span>{formatMinutesAsTime(selectedCustomOption.slotStartMinutes)}</span>
-                                          <span>{formatMinutesAsTime(selectedCustomOption.slotEndMinutes)}</span>
+                                          <span>{formatMinutesAsTime(sliderMinMinutes)}</span>
+                                          <span>{formatMinutesAsTime(sliderMaxMinutes)}</span>
                                       </div>
                                       <Slider
                                           value={[customStartMinutes]}
-                                          min={selectedCustomOption.minCustomStartMinutes}
-                                          max={selectedCustomOption.maxCustomStartMinutes}
+                                          min={sliderMinMinutes}
+                                          max={sliderMaxMinutes}
                                           step={5}
                                           onValueChange={(value) => handleTimeslotCustomStartChange(selectedCustomOption, value)}
                                           data-testid={`schedule-timeslot-custom-slider-${selectedCustomOption.id}`}
@@ -5621,9 +5636,6 @@ export default function ScheduleBoard() {
                                           <span>Dauer inkl. Pause: {formatDurationMinutes(selectedCustomOption.effectivePresenceMinutes)}</span>
                                           <span>Einsatz endet innerhalb des Slots</span>
                                       </div>
-                                      {selectedCustomOption.earlyLeaveLabel && (
-                                          <div className="text-xs font-medium text-amber-800">{selectedCustomOption.earlyLeaveLabel}</div>
-                                      )}
                                       <div className="flex justify-end gap-2 pt-1">
                                           <Button
                                               type="button"
