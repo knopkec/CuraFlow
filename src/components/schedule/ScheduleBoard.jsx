@@ -508,6 +508,38 @@ const LateAvailabilityBadge = ({ tooltip, compact = false }) => (
     </TooltipProvider>
 );
 
+const TimeslotSummaryHint = ({ summary, details = [], count = 0 }) => {
+    if (!summary) return null;
+
+    const tooltipLines = Array.isArray(details) && details.length > 0 ? details : [summary];
+    const ariaLabel = count > 0 ? `Multi-Slot mit ${count} Zeitfenstern` : 'Multi-Slot';
+
+    return (
+        <TooltipProvider delayDuration={100}>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <span
+                        className="w-fit cursor-help text-[10px] font-normal text-slate-500 underline decoration-dotted underline-offset-2"
+                        aria-label={ariaLabel}
+                    >
+                        Multi-Slot
+                    </span>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-xs px-3 py-2 text-left">
+                    <div className="space-y-1">
+                        <div className="font-medium">Zeitfenster</div>
+                        {tooltipLines.map((line) => (
+                            <div key={line} className="text-xs leading-snug">
+                                {line}
+                            </div>
+                        ))}
+                    </div>
+                </TooltipContent>
+            </Tooltip>
+        </TooltipProvider>
+    );
+};
+
 export default function ScheduleBoard() {
     const initialState = useMemo(() => getInitialScheduleState(), []);
     const isEmbeddedSchedule = useMemo(() => {
@@ -1105,6 +1137,13 @@ export default function ScheduleBoard() {
                           singleTimeslotLabel: wpTimeslots[0].label
                       });
                   } else if (wpTimeslots.length > 1) {
+                      const timeslotDetails = wpTimeslots
+                          .map((timeslot) => {
+                              const range = formatTimeslotTimeRange(timeslot.start_time, timeslot.end_time);
+                              return timeslot.label ? `${timeslot.label}${range ? ` ${range}` : ''}` : range;
+                          })
+                          .filter(Boolean);
+
                       rows.push({
                           name: wp.name,
                           displayName: wp.name,
@@ -1115,13 +1154,8 @@ export default function ScheduleBoard() {
                           timeslotCount: wpTimeslots.length,
                           allTimeslotIds: wpTimeslots.map(t => t.id),
                           workplaceId: wp.id,
-                          timeslotSummary: wpTimeslots
-                              .map((timeslot) => {
-                                  const range = formatTimeslotTimeRange(timeslot.start_time, timeslot.end_time);
-                                  return timeslot.label ? `${timeslot.label}${range ? ` ${range}` : ''}` : range;
-                              })
-                              .filter(Boolean)
-                              .join(' · ')
+                          timeslotDetails,
+                          timeslotSummary: timeslotDetails.join(' · ')
                       });
                   } else {
                       // Timeslots aktiviert aber noch keine definiert
@@ -4120,9 +4154,11 @@ export default function ScheduleBoard() {
                                                               </span>
                                                           )}
                                                           {rowObj.timeslotSummary && (
-                                                              <span className="text-[10px] font-normal text-slate-500 line-clamp-2">
-                                                                  {rowObj.timeslotSummary}
-                                                              </span>
+                                                              <TimeslotSummaryHint
+                                                                  summary={rowObj.timeslotSummary}
+                                                                  details={rowObj.timeslotDetails}
+                                                                  count={rowObj.timeslotCount}
+                                                              />
                                                           )}
                                                       </div>
                                                       <div className="hidden">{provided.placeholder}</div>
@@ -4933,9 +4969,11 @@ export default function ScheduleBoard() {
                                                 </span>
                                             )}
                                             {rowObj.timeslotSummary && (
-                                                <span className="text-[10px] font-normal text-slate-500 line-clamp-2">
-                                                    {rowObj.timeslotSummary}
-                                                </span>
+                                                <TimeslotSummaryHint
+                                                    summary={rowObj.timeslotSummary}
+                                                    details={rowObj.timeslotDetails}
+                                                    count={rowObj.timeslotCount}
+                                                />
                                             )}
                                             {!rowObj.isTimeslotRow && rowWorkplace?.time && (
                                                 <span className="text-[10px] font-normal opacity-80">
