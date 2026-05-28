@@ -31,10 +31,6 @@ router.get('/', async (req, res, next) => {
 
 router.get('/central-employees', async (req, res, next) => {
   try {
-    if (!requireAdminRole(req, res)) {
-      return;
-    }
-
     const tenantId = await resolveTenantIdFromToken(db, req.dbToken);
     if (!tenantId) {
       return res.status(400).json({ error: 'Aktiver Mandant konnte nicht aufgelöst werden' });

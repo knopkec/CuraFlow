@@ -1,13 +1,10 @@
 import { Draggable } from '@hello-pangea/dnd';
 import { User, Clock } from 'lucide-react';
+import { resolveDoctorTargetWeeklyHours } from '@/components/schedule/doctorWorkTime';
 
-export default function DraggableDoctor({ doctor, index, style, isDragDisabled, isBeingDragged, compactLabel, isCompactMode = false, workTimeModel, plannedHours, showTimeAccount = false }) {
+export default function DraggableDoctor({ doctor, index, style, isDragDisabled, isBeingDragged, compactLabel, isCompactMode = false, workTimeModel, centralEmployee = null, plannedHours, showTimeAccount = false }) {
   const chipLabel = compactLabel || doctor.initials || doctor.name.substring(0, 3);
-  // Wochenstunden-Priorität: 1) Doctor.target_weekly_hours, 2) WorkTimeModel, 3) FTE * 38.5
-  const DEFAULT_FULLTIME_HOURS = 38.5;
-  const targetWeekly = doctor.target_weekly_hours ? Number(doctor.target_weekly_hours)
-    : workTimeModel ? Number(workTimeModel.hours_per_week)
-    : (doctor.fte && Number(doctor.fte) > 0 ? Math.round(Number(doctor.fte) * DEFAULT_FULLTIME_HOURS * 10) / 10 : null);
+  const targetWeekly = resolveDoctorTargetWeeklyHours(doctor, workTimeModel, centralEmployee);
   const planned = plannedHours || 0;
   const pct = targetWeekly ? (planned / targetWeekly) * 100 : null;
 

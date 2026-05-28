@@ -57,6 +57,7 @@ import { isNonWorkingShiftPosition } from '@/utils/shiftPositionUtils';
 import { applyAlwaysVisibleRowsToSections, parseAlwaysVisibleRows, ALWAYS_VISIBLE_ROWS_KEY } from '@/components/schedule/sectionVisibility';
 import { createScheduleShiftLookup, getShiftsForScheduleCell } from '@/components/schedule/scheduleShiftLookup';
 import { buildInitialCustomTimeslotEndMinutesByOption, getDefaultCustomTimeslotEndMinutes, normalizeCustomTimeslotEndMinutes } from '@/components/schedule/timeslotSelectionUtils';
+import { resolveDoctorTargetDailyHours } from '@/components/schedule/doctorWorkTime';
 // import VoiceControl from './VoiceControl';
 
 const STATIC_SECTIONS = {
@@ -312,7 +313,6 @@ const formatTimeslotTimeRange = (startTime, endTime) => {
     return `${startTime.substring(0, 5)}-${endTime.substring(0, 5)}`;
 };
 
-const DEFAULT_FULLTIME_DAILY_HOURS = 7.7;
 const DEFAULT_BREAK_MINUTES = 30;
 const ROUTINE_SERVICE_START_MINUTES = 7 * 60;
 const LATE_ROTATION_THRESHOLD_MINUTES = ROUTINE_SERVICE_START_MINUTES + (4 * 60);
@@ -378,7 +378,7 @@ const mergePlannedIntervals = (intervals) => {
     return merged.reduce((sum, interval) => sum + (interval.end - interval.start), 0);
 };
 
-const buildShiftInterval = (shift, doctor, workplace, timeslot, workTimeModelMap) => {
+const buildShiftInterval = (shift, doctor, workplace, timeslot, workTimeModelMap, centralEmployeesById) => {
     if (shift.start_time && shift.end_time) {
         const start = parseTimeToMinutes(shift.start_time);
         let end = parseTimeToMinutes(shift.end_time);
@@ -396,7 +396,7 @@ const buildShiftInterval = (shift, doctor, workplace, timeslot, workTimeModelMap
     }
 
     if (timeslot?.start_time && timeslot?.end_time) {
-        const timeRange = getTimeslotDerivedTimeRange(timeslot, doctor, workplace, workTimeModelMap);
+        const timeRange = getTimeslotDerivedTimeRange(timeslot, doctor, workplace, workTimeModelMap, centralEmployeesById);
         if (timeRange) {
             return {
                 start: timeRange.start,
@@ -405,7 +405,7 @@ const buildShiftInterval = (shift, doctor, workplace, timeslot, workTimeModelMap
         }
     }
 
-    const fallbackHours = getDoctorTargetDailyHours(doctor, workTimeModelMap);
+    const fallbackHours = getDoctorTargetDailyHours(doctor, workTimeModelMap, centralEmployeesById);
     if (!fallbackHours) return null;
 
     return {
@@ -458,30 +458,16 @@ const getRowLabelPresentation = (label, isCompactMode = false) => {
     };
 };
 
-const getDoctorTargetDailyHours = (doctor, workTimeModelMap) => {
+const getDoctorTargetDailyHours = (doctor, workTimeModelMap, centralEmployeesById) => {
     if (!doctor) return null;
 
-    if (doctor.target_weekly_hours) {
-        return Number(doctor.target_weekly_hours) / 5;
-    }
-
     const model = doctor.work_time_model_id ? workTimeModelMap.get(doctor.work_time_model_id) : null;
-    if (model?.hours_per_day) {
-        return Number(model.hours_per_day);
-    }
-    if (model?.hours_per_week) {
-        return Number(model.hours_per_week) / 5;
-    }
-
-    if (doctor.fte && Number(doctor.fte) > 0) {
-        return Number(doctor.fte) * DEFAULT_FULLTIME_DAILY_HOURS;
-    }
-
-    return null;
+    const centralEmployee = doctor.central_employee_id ? centralEmployeesById.get(String(doctor.central_employee_id)) : null;
+    return resolveDoctorTargetDailyHours(doctor, model, centralEmployee);
 };
 
-const getDoctorTargetDailyMinutes = (doctor, workTimeModelMap) => {
-    const dailyHours = getDoctorTargetDailyHours(doctor, workTimeModelMap);
+const getDoctorTargetDailyMinutes = (doctor, workTimeModelMap, centralEmployeesById) => {
+    const dailyHours = getDoctorTargetDailyHours(doctor, workTimeModelMap, centralEmployeesById);
     if (dailyHours === null || dailyHours === undefined) return null;
 
     const parsedDailyHours = Number(dailyHours);
@@ -490,7 +476,7 @@ const getDoctorTargetDailyMinutes = (doctor, workTimeModelMap) => {
     return Math.round(parsedDailyHours * 60);
 };
 
-const getTimeslotDerivedTimeRange = (timeslot, doctor, workplace, workTimeModelMap) => {
+const getTimeslotDerivedTimeRange = (timeslot, doctor, workplace, workTimeModelMap, centralEmployeesById) => {
     if (!timeslot?.start_time || !timeslot?.end_time) return null;
 
     const start = parseTimeToMinutes(timeslot.start_time);
@@ -504,7 +490,7 @@ const getTimeslotDerivedTimeRange = (timeslot, doctor, workplace, workTimeModelM
     const slotDurationMinutes = end - start;
     const workTimeFactor = (workplace?.work_time_percentage ?? 100) / 100;
     const scaledWorkMinutes = Math.round(slotDurationMinutes * workTimeFactor);
-    const doctorDailyMinutes = getDoctorTargetDailyMinutes(doctor, workTimeModelMap);
+    const doctorDailyMinutes = getDoctorTargetDailyMinutes(doctor, workTimeModelMap, centralEmployeesById);
 
     if (doctorDailyMinutes === null || scaledWorkMinutes <= doctorDailyMinutes) {
         return {
@@ -525,7 +511,7 @@ const getTimeslotDerivedTimeRange = (timeslot, doctor, workplace, workTimeModelM
     };
 };
 
-const buildTimeslotSelectionOption = (timeslot, doctor, workplace, workTimeModelMap) => {
+const buildTimeslotSelectionOption = (timeslot, doctor, workplace, workTimeModelMap, centralEmployeesById) => {
     const rawStartMinutes = parseTimeToMinutes(timeslot?.start_time);
     let rawEndMinutes = parseTimeToMinutes(timeslot?.end_time);
     if (rawStartMinutes === null || rawEndMinutes === null) {
@@ -544,7 +530,7 @@ const buildTimeslotSelectionOption = (timeslot, doctor, workplace, workTimeModel
         rawEndMinutes += 24 * 60;
     }
 
-    const derivedRange = getTimeslotDerivedTimeRange(timeslot, doctor, workplace, workTimeModelMap);
+    const derivedRange = getTimeslotDerivedTimeRange(timeslot, doctor, workplace, workTimeModelMap, centralEmployeesById);
     const slotStartLabel = formatMinutesAsTime(rawStartMinutes);
     const slotEndLabel = formatMinutesAsTime(rawEndMinutes);
     const effectiveStartMinutes = derivedRange?.start ?? rawStartMinutes;
@@ -554,7 +540,7 @@ const buildTimeslotSelectionOption = (timeslot, doctor, workplace, workTimeModel
     const slotDurationMinutes = rawEndMinutes - rawStartMinutes;
     const effectivePresenceMinutes = Math.max(0, effectiveEndMinutes - effectiveStartMinutes);
     const leavesEarly = Boolean(derivedRange) && effectiveEndMinutes < rawEndMinutes;
-    const dailyMinutes = getDoctorTargetDailyMinutes(doctor, workTimeModelMap);
+    const dailyMinutes = getDoctorTargetDailyMinutes(doctor, workTimeModelMap, centralEmployeesById);
 
     return {
         ...timeslot,
@@ -635,7 +621,7 @@ const applyTimeslotSelectionToUpdateData = (data, selection) => {
     return nextData;
 };
 
-const getShiftTimeRangeLabel = (shift, doctor, workplace, workplaceTimeslots, workTimeModelMap) => {
+const getShiftTimeRangeLabel = (shift, doctor, workplace, workplaceTimeslots, workTimeModelMap, centralEmployeesById) => {
     if (shift?.start_time && shift?.end_time) {
         return formatTimeslotTimeRange(shift.start_time, shift.end_time);
     }
@@ -643,7 +629,7 @@ const getShiftTimeRangeLabel = (shift, doctor, workplace, workplaceTimeslots, wo
     if (!shift?.timeslot_id) return null;
 
     const timeslot = workplaceTimeslots.find((entry) => entry.id === shift.timeslot_id);
-    const timeRange = getTimeslotDerivedTimeRange(timeslot, doctor, workplace, workTimeModelMap);
+    const timeRange = getTimeslotDerivedTimeRange(timeslot, doctor, workplace, workTimeModelMap, centralEmployeesById);
     if (!timeRange) return formatTimeslotTimeRange(timeslot?.start_time, timeslot?.end_time);
 
     const startLabel = formatMinutesAsTime(timeRange.start);
@@ -1325,6 +1311,28 @@ export default function ScheduleBoard() {
     }
     return map;
   }, [workTimeModels]);
+
+    const { data: centralEmployees = [] } = useQuery({
+        queryKey: ['tenant-central-employees-for-schedule'],
+        queryFn: async () => {
+            try {
+                const res = await api.request('/api/staff/central-employees');
+                return res.employees || [];
+            } catch {
+                return [];
+            }
+        },
+        staleTime: 10 * 60 * 1000,
+        refetchOnWindowFocus: false,
+    });
+
+    const centralEmployeesById = useMemo(() => {
+        const map = new Map();
+        for (const employee of centralEmployees) {
+            map.set(String(employee.id), employee);
+        }
+        return map;
+    }, [centralEmployees]);
 
 
     const allSections = useMemo(() => {
@@ -2554,7 +2562,7 @@ export default function ScheduleBoard() {
         const doctor = doctorId ? doctorById.get(doctorId) : null;
 
         return (workplaceTimeslotsByWorkplaceId.get(workplace.id) || []).map((timeslot) => ({
-            ...buildTimeslotSelectionOption(timeslot, doctor, workplace, workTimeModelMap),
+            ...buildTimeslotSelectionOption(timeslot, doctor, workplace, workTimeModelMap, centralEmployeesById),
         }));
     };
 
@@ -2735,7 +2743,7 @@ export default function ScheduleBoard() {
                     const timeslot = shift.timeslot_id
                         ? workplaceTimeslots.find(slot => slot.id === shift.timeslot_id)
                         : null;
-                    return buildShiftInterval(shift, doctor, workplace, timeslot, workTimeModelMap);
+                    return buildShiftInterval(shift, doctor, workplace, timeslot, workTimeModelMap, centralEmployeesById);
                 })
                 .filter(Boolean);
 
@@ -2748,7 +2756,7 @@ export default function ScheduleBoard() {
         });
 
     return map;
-    }, [currentWeekShifts, weekDays, doctors, workplaces, workplaceTimeslots, workTimeModelMap]);
+    }, [currentWeekShifts, weekDays, doctors, workplaces, workplaceTimeslots, workTimeModelMap, centralEmployeesById]);
 
   const cleanupAutoFreiOnly = (doctorId, dateStr, position) => {
       const autoFreiShift = findAutoFreiToCleanup(doctorId, dateStr, position);
@@ -4211,7 +4219,7 @@ export default function ScheduleBoard() {
         if (!doctor) return null;
         const compactLabel = getDoctorChipLabel(doctor);
         
-        const shiftTimeLabel = getShiftTimeRangeLabel(shift, doctor, workplace, workplaceTimeslots, workTimeModelMap);
+        const shiftTimeLabel = getShiftTimeRangeLabel(shift, doctor, workplace, workplaceTimeslots, workTimeModelMap, centralEmployeesById);
         const lateRotationTooltip = lateRotationIndicatorByDoctorDay.get(`${doctor.id}__${dateStr}`) || null;
         
         // Qualifikations-Indikator
@@ -5083,6 +5091,7 @@ export default function ScheduleBoard() {
                                     isDragDisabled={isReadOnly}
                                     isBeingDragged={draggingDoctorId === doctor.id}
                                     workTimeModel={doctor.work_time_model_id ? workTimeModelMap.get(doctor.work_time_model_id) : null}
+                                    centralEmployee={doctor.central_employee_id ? centralEmployeesById.get(String(doctor.central_employee_id)) : null}
                                     plannedHours={weeklyPlannedHours.get(doctor.id) || 0}
                                     showTimeAccount={showSidebarTimeAccount}
                                 />
