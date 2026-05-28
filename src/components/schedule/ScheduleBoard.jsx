@@ -5595,51 +5595,37 @@ export default function ScheduleBoard() {
                                               </div>
 
                                               {timeslotSelectionDialog.allowCustomEditing && timeslot.canCustomize && (
-                                                  <div className="mt-4 rounded-lg border border-slate-200 bg-white/80 p-3">
-                                                      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-                                                          <div>
-                                                              <div className="text-sm font-medium text-slate-900">Endzeit manuell anpassen</div>
-                                                              <div className="text-xs text-slate-600">
-                                                                  {slotEndHint
-                                                                      ? `Der Einsatz bleibt innerhalb des Slots und kann bis ${slotEndHint} dauern.`
-                                                                      : 'Der Einsatz bleibt innerhalb des Slots.'}
-                                                              </div>
-                                                          </div>
-                                                          {customTimeRange && (
-                                                              <div className="rounded-md bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
-                                                                  {customTimeRange}
-                                                              </div>
-                                                          )}
-                                                      </div>
-
-                                                      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                                                          <label className="block w-full max-w-[180px] text-xs font-medium uppercase tracking-wide text-slate-500">
-                                                              Endzeit
-                                                              <Input
-                                                                  type="time"
-                                                                  step={300}
-                                                                  value={Number.isFinite(customEndMinutes) ? formatMinutesAsTime(customEndMinutes) : ''}
-                                                                  onChange={(event) => handleTimeslotCustomEndChange(timeslot.id, timeslot, event.target.value)}
-                                                                  className="mt-1"
-                                                                  data-testid={`schedule-timeslot-custom-end-${timeslot.id}`}
-                                                              />
-                                                          </label>
-                                                          <div className="flex items-center gap-2">
-                                                              <span className="text-xs text-slate-500">
-                                                                  {timeslot.customBreakMinutes > 0
-                                                                      ? `Pausenabzug: ${timeslot.customBreakMinutes} Min`
-                                                                      : 'Kein Pausenabzug'}
-                                                              </span>
-                                                              <Button
-                                                                  type="button"
-                                                                  size="sm"
-                                                                  onClick={() => handleTimeslotCustomApply(timeslot)}
-                                                                  data-testid={`schedule-timeslot-custom-apply-${timeslot.id}`}
-                                                              >
-                                                                  Endzeit übernehmen
-                                                              </Button>
-                                                          </div>
-                                                      </div>
+                                                  <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+                                                      <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+                                                          Ende
+                                                          <Input
+                                                              type="time"
+                                                              step={300}
+                                                              value={Number.isFinite(customEndMinutes) ? formatMinutesAsTime(customEndMinutes) : ''}
+                                                              onChange={(event) => handleTimeslotCustomEndChange(timeslot.id, timeslot, event.target.value)}
+                                                              className="h-8 w-[124px]"
+                                                              data-testid={`schedule-timeslot-custom-end-${timeslot.id}`}
+                                                          />
+                                                      </label>
+                                                      <Button
+                                                          type="button"
+                                                          size="sm"
+                                                          className="h-8 px-3"
+                                                          onClick={() => handleTimeslotCustomApply(timeslot)}
+                                                          data-testid={`schedule-timeslot-custom-apply-${timeslot.id}`}
+                                                      >
+                                                          Speichern
+                                                      </Button>
+                                                      {customTimeRange && (
+                                                          <span className="text-xs text-slate-500">
+                                                              {customTimeRange}
+                                                          </span>
+                                                      )}
+                                                      {slotEndHint && (
+                                                          <span className="text-xs text-slate-400">
+                                                              bis {slotEndHint}
+                                                          </span>
+                                                      )}
                                                   </div>
                                               )}
                                           </div>
