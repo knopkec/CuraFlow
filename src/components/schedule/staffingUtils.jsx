@@ -1,3 +1,34 @@
+const STAFFING_PLAN_UNAVAILABLE_CODES = new Set(['KO', 'EZ', 'MS']);
+
+export function getDoctorEffectiveFte(doctor, date, planEntries) {
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+    const entry = planEntries.find(e => e.doctor_id === doctor.id && e.year === year && e.month === month);
+
+    const entryValue = typeof entry?.value === 'string' ? entry.value.trim() : entry?.value;
+    let value;
+
+    if (entryValue !== undefined && entryValue !== null && entryValue !== '') {
+        value = String(entryValue);
+    } else if (doctor.fte !== undefined && doctor.fte !== null && String(doctor.fte).trim() !== '') {
+        value = String(doctor.fte);
+    } else {
+        value = '1.0';
+    }
+
+    const normalizedValue = String(value).trim();
+    if (STAFFING_PLAN_UNAVAILABLE_CODES.has(normalizedValue)) {
+        return 0;
+    }
+
+    const parsedFte = parseFloat(normalizedValue.replace(',', '.'));
+    if (Number.isNaN(parsedFte)) {
+        return 0;
+    }
+
+    return parsedFte;
+}
+
 export function isDoctorAvailable(doctor, date, planEntries) {
     // Check contract end
     if (doctor.contract_end_date) {
@@ -10,39 +41,7 @@ export function isDoctorAvailable(doctor, date, planEntries) {
         if (checkDate > endDate) return false;
     }
     
-    // Check Plan Entry
-    const year = date.getFullYear();
-    const month = date.getMonth() + 1;
-    const entry = planEntries.find(e => e.doctor_id === doctor.id && e.year === year && e.month === month);
-
-    // Keep availability aligned with the staffing table: empty monthly values fall back to the doctor's default FTE.
-    const entryValue = typeof entry?.value === 'string' ? entry.value.trim() : entry?.value;
-    let val;
-
-    if (entryValue !== undefined && entryValue !== null && entryValue !== '') {
-        val = String(entryValue);
-    } else if (doctor.fte !== undefined && doctor.fte !== null && String(doctor.fte).trim() !== '') {
-        val = String(doctor.fte);
-    } else {
-        val = "1.0";
-    }
-
-    // In StaffingPlanTable we said: "If monthStart > endDate -> ''". 
-    // If contract ends, we handle it above.
-    // If no entry and no contract end issue, we use doctor.fte.
-    
-    // Normalize
-    val = String(val).trim();
-    
-    if (val === "KO" || val === "EZ" || val === "MS") return false;
-    
-    // Check 0.00
-    // Replace , with .
-    const num = parseFloat(val.replace(',', '.'));
-    // If it's a number and <= 0, unavailable
-    if (!isNaN(num) && num <= 0.0001) return false; // epsilon for float safety
-    
-    return true;
+    return getDoctorEffectiveFte(doctor, date, planEntries) > 0.0001;
 }
 
 function blocksAvailability({ category, affectsAvailability, allowsRotationConcurrently }) {

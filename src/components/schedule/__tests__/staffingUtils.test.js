@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { isDoctorAvailable, calculateWeeklyTargetHours, getAvailabilityBlockingDoctorIdsByDate } from '../staffingUtils';
+import {
+  isDoctorAvailable,
+  calculateWeeklyTargetHours,
+  getAvailabilityBlockingDoctorIdsByDate,
+  getDoctorEffectiveFte,
+} from '../staffingUtils';
 
 // ---------------------------------------------------------------------------
 // isDoctorAvailable
@@ -49,6 +54,22 @@ describe('isDoctorAvailable', () => {
   it('uses default 1.0 FTE when doctor has no fte field and no plan entry', () => {
     const doctor = { id: 1 };
     expect(isDoctorAvailable(doctor, new Date(2024, 2, 11), [])).toBe(true);
+  });
+});
+
+describe('getDoctorEffectiveFte', () => {
+  it('prefers the monthly staffing plan entry over doctor.fte', () => {
+    const doctor = { id: 1, fte: 1.0 };
+    const planEntries = [{ doctor_id: 1, year: 2024, month: 3, value: '0,50' }];
+
+    expect(getDoctorEffectiveFte(doctor, new Date(2024, 2, 11), planEntries)).toBe(0.5);
+  });
+
+  it.each(['KO', 'EZ', 'MS'])('maps staffing code %s to 0 fte', (value) => {
+    const doctor = { id: 1, fte: 1.0 };
+    const planEntries = [{ doctor_id: 1, year: 2024, month: 3, value }];
+
+    expect(getDoctorEffectiveFte(doctor, new Date(2024, 2, 11), planEntries)).toBe(0);
   });
 });
 

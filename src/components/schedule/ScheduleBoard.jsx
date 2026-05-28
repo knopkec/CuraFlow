@@ -47,7 +47,7 @@ import { useAllDoctorQualifications, useAllWorkplaceQualifications } from '@/hoo
 import OverrideConfirmDialog from '@/components/validation/OverrideConfirmDialog';
 // trackDbChange removed - MySQL mode doesn't use auto-backup
 import { useHolidays } from '@/components/useHolidays';
-import { getAvailabilityBlockingDoctorIdsByDate, isDoctorAvailable } from './staffingUtils';
+import { getAvailabilityBlockingDoctorIdsByDate, getDoctorEffectiveFte, isDoctorAvailable } from './staffingUtils';
 import SectionConfigDialog, { useSectionConfig } from '@/components/settings/SectionConfigDialog';
 import MobileScheduleView from './MobileScheduleView';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -2501,6 +2501,17 @@ export default function ScheduleBoard() {
         );
         }, [currentDate, doctors, sortDoctorsAlphabetically, staffingPlanEntries, viewMode, weekDays]);
 
+    const getDoctorWithEffectiveFte = (doctor, referenceDate) => {
+        if (!doctor || !referenceDate) {
+            return doctor;
+        }
+
+        return {
+            ...doctor,
+            fte: getDoctorEffectiveFte(doctor, new Date(referenceDate), staffingPlanEntries),
+        };
+    };
+
   const currentWeekShifts = useMemo(() => {
     // Use weekDays to determine range, ensuring we catch shifts for visible days
     if (weekDays.length === 0) return [];
@@ -2559,7 +2570,8 @@ export default function ScheduleBoard() {
         const workplace = workplaceByName.get(positionName);
         if (!workplace?.timeslots_enabled) return [];
 
-        const doctor = doctorId ? doctorById.get(doctorId) : null;
+        const baseDoctor = doctorId ? doctorById.get(doctorId) : null;
+        const doctor = baseDoctor ? getDoctorWithEffectiveFte(baseDoctor, currentDate) : null;
 
         return (workplaceTimeslotsByWorkplaceId.get(workplace.id) || []).map((timeslot) => ({
             ...buildTimeslotSelectionOption(timeslot, doctor, workplace, workTimeModelMap, centralEmployeesById),
@@ -2736,8 +2748,9 @@ export default function ScheduleBoard() {
         }
 
         shiftsByDoctorAndDate.forEach((entries, groupKey) => {
-            const [doctorId] = groupKey.split('__');
-            const doctor = doctors.find(d => d.id === doctorId);
+            const [doctorId, dateStr] = groupKey.split('__');
+            const baseDoctor = doctors.find(d => d.id === doctorId);
+            const doctor = baseDoctor ? getDoctorWithEffectiveFte(baseDoctor, dateStr) : null;
             const intervals = entries
                 .map(({ shift, workplace }) => {
                     const timeslot = shift.timeslot_id
@@ -4215,7 +4228,8 @@ export default function ScheduleBoard() {
     }
 
     return shifts.map((shift, index) => {
-        const doctor = doctorById.get(shift.doctor_id);
+        const baseDoctor = doctorById.get(shift.doctor_id);
+        const doctor = baseDoctor ? getDoctorWithEffectiveFte(baseDoctor, shift.date) : null;
         if (!doctor) return null;
         const compactLabel = getDoctorChipLabel(doctor);
         
@@ -5080,22 +5094,26 @@ export default function ScheduleBoard() {
                 >
                     {(provided) => (
                         <div ref={provided.innerRef} {...provided.droppableProps} className="space-y-1">
-                            {sidebarDoctors.map((doctor, index) => (
-                                <DraggableDoctor 
-                                    key={doctor.id} 
-                                    doctor={doctor} 
-                                    index={index} 
-                                    style={getRoleColor(doctor.role)}
-                                    compactLabel={getDoctorChipLabel(doctor)}
-                                    isCompactMode={isMonthView}
-                                    isDragDisabled={isReadOnly}
-                                    isBeingDragged={draggingDoctorId === doctor.id}
-                                    workTimeModel={doctor.work_time_model_id ? workTimeModelMap.get(doctor.work_time_model_id) : null}
-                                    centralEmployee={doctor.central_employee_id ? centralEmployeesById.get(String(doctor.central_employee_id)) : null}
-                                    plannedHours={weeklyPlannedHours.get(doctor.id) || 0}
-                                    showTimeAccount={showSidebarTimeAccount}
-                                />
-                            ))}
+                            {sidebarDoctors.map((doctor, index) => {
+                                const sidebarDoctor = getDoctorWithEffectiveFte(doctor, viewMode === 'month' ? currentDate : weekDays[0]);
+
+                                return (
+                                    <DraggableDoctor 
+                                        key={doctor.id} 
+                                        doctor={sidebarDoctor} 
+                                        index={index} 
+                                        style={getRoleColor(doctor.role)}
+                                        compactLabel={getDoctorChipLabel(doctor)}
+                                        isCompactMode={isMonthView}
+                                        isDragDisabled={isReadOnly}
+                                        isBeingDragged={draggingDoctorId === doctor.id}
+                                        workTimeModel={doctor.work_time_model_id ? workTimeModelMap.get(doctor.work_time_model_id) : null}
+                                        centralEmployee={doctor.central_employee_id ? centralEmployeesById.get(String(doctor.central_employee_id)) : null}
+                                        plannedHours={weeklyPlannedHours.get(doctor.id) || 0}
+                                        showTimeAccount={showSidebarTimeAccount}
+                                    />
+                                );
+                            })}
                             {provided.placeholder}
                         </div>
                     )}
