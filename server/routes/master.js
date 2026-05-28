@@ -15,7 +15,10 @@ import { db } from '../index.js';
 import { authMiddleware, adminMiddleware } from './auth.js';
 import { parseDbToken } from '../utils/crypto.js';
 import { deleteEmployeeDependentRecords } from '../utils/masterEmployees.js';
-import { syncEmployeeWorkSettingsToTenantDoctors } from '../utils/masterEmployeeWorkSettings.js';
+import {
+  resolveEmployeeTargetWeeklyHours,
+  syncEmployeeWorkSettingsToTenantDoctors,
+} from '../utils/masterEmployeeWorkSettings.js';
 import { broadcastPlanUpdate, buildRealtimeScope } from '../utils/realtime.js';
 import { format, startOfMonth, endOfMonth, getDaysInMonth } from 'date-fns';
 import { getPublicHolidayDatesForYear, clearHolidayCache } from './holidays.js';
@@ -147,6 +150,27 @@ function calculateMonthlyTargetMinutes(targetHoursPerWeek, year, month) {
 
   const daysInMonth = getDaysInMonth(new Date(year, month - 1, 1));
   return Math.round((daysInMonth * weeklyHours / 7) * 60);
+}
+
+async function syncEmployeeWorkSettingsForAssignments(adminUserId, employee, assignments, actor = null) {
+  const linkedAssignments = (assignments || []).filter(
+    (assignment) => assignment.tenant_id && assignment.tenant_doctor_id
+  );
+
+  if (!employee?.id || linkedAssignments.length === 0) {
+    return { syncedAssignments: [], skippedAssignments: [], failedAssignments: [] };
+  }
+
+  const tokens = await getAllTenantTokens(adminUserId);
+  return syncEmployeeWorkSettingsToTenantDoctors({
+    employee,
+    assignments: linkedAssignments,
+    tokens,
+    withTenantDb,
+    actor,
+    buildRealtimeScope,
+    broadcastPlanUpdate,
+  });
 }
 
 async function syncTimeAccountsForEmployee(adminUserId, employee, assignments) {
@@ -294,7 +318,11 @@ async function syncTimeAccountsForEmployee(adminUserId, employee, assignments) {
       continue;
     }
 
-    const targetMinutes = calculateMonthlyTargetMinutes(employee.target_hours_per_week ?? 38.5, period.year, period.month);
+    const targetMinutes = calculateMonthlyTargetMinutes(
+      resolveEmployeeTargetWeeklyHours(employee) ?? 38.5,
+      period.year,
+      period.month
+    );
     const actualMinutes = Math.round(actualMinutesByMonth.get(period.key) || 0);
     const balanceMinutes = actualMinutes - targetMinutes;
     const status = (period.year === now.getFullYear() && period.month === now.getMonth() + 1)
@@ -1150,7 +1178,12 @@ router.get('/employees', async (req, res, next) => {
  */
 router.post('/employees/sync-time-accounts', async (req, res, next) => {
   try {
-    const [employees] = await db.execute('SELECT * FROM Employee ORDER BY last_name ASC, first_name ASC');
+    const [employees] = await db.execute(
+      `SELECT e.*, wtm.hours_per_week as model_hours_per_week
+       FROM Employee e
+       LEFT JOIN WorkTimeModel wtm ON e.work_time_model_id = wtm.id
+       ORDER BY e.last_name ASC, e.first_name ASC`
+    );
     const [allAssignments] = await db.execute(
       `SELECT eta.*, dt.name as tenant_name
        FROM EmployeeTenantAssignment eta
@@ -1168,6 +1201,10 @@ router.post('/employees/sync-time-accounts', async (req, res, next) => {
 
     for (const employee of linkedEmployees) {
       const assignments = allAssignments.filter((assignment) => assignment.employee_id === employee.id);
+      await syncEmployeeWorkSettingsForAssignments(req.user.sub, employee, assignments, {
+        id: req.user.sub,
+        email: req.user.email || null,
+      });
       const result = await syncTimeAccountsForEmployee(req.user.sub, employee, assignments);
       if (result?.synced) {
         syncedEmployees += 1;
@@ -1217,6 +1254,10 @@ router.get('/employees/:id', async (req, res, next) => {
     );
 
     try {
+      await syncEmployeeWorkSettingsForAssignments(req.user.sub, emp, assignments, {
+        id: req.user.sub,
+        email: req.user.email || null,
+      });
       await syncTimeAccountsForEmployee(req.user.sub, emp, assignments);
     } catch (syncError) {
       console.warn(`[Master employees] Time-account sync failed for ${id}: ${syncError.message}`);
@@ -1258,8 +1299,9 @@ router.post('/employees/:id/sync-time-accounts', async (req, res, next) => {
     const { id } = req.params;
 
     const [rows] = await db.execute(
-      `SELECT e.*
+      `SELECT e.*, wtm.hours_per_week as model_hours_per_week
        FROM Employee e
+       LEFT JOIN WorkTimeModel wtm ON e.work_time_model_id = wtm.id
        WHERE e.id = ?`,
       [id]
     );
@@ -1275,6 +1317,11 @@ router.post('/employees/:id/sync-time-accounts', async (req, res, next) => {
        WHERE eta.employee_id = ?`,
       [id]
     );
+
+    await syncEmployeeWorkSettingsForAssignments(req.user.sub, employee, assignments, {
+      id: req.user.sub,
+      email: req.user.email || null,
+    });
 
     const result = await syncTimeAccountsForEmployee(req.user.sub, employee, assignments);
     const [timeAccounts] = await db.execute(
@@ -1390,7 +1437,10 @@ router.put('/employees/:id', async (req, res, next) => {
     await db.execute(`UPDATE Employee SET ${updates.join(', ')} WHERE id = ?`, values);
 
     const [employeeRows] = await db.execute(
-      'SELECT id, target_hours_per_week, work_time_model_id FROM Employee WHERE id = ?',
+      `SELECT e.id, e.target_hours_per_week, e.work_time_model_id, wtm.hours_per_week as model_hours_per_week
+       FROM Employee e
+       LEFT JOIN WorkTimeModel wtm ON e.work_time_model_id = wtm.id
+       WHERE e.id = ?`,
       [id]
     );
     const [assignmentRows] = await db.execute(
@@ -1403,18 +1453,9 @@ router.put('/employees/:id', async (req, res, next) => {
     );
 
     if (employeeRows.length > 0 && assignmentRows.length > 0) {
-      const tokens = await getAllTenantTokens(req.user.sub);
-      const syncResult = await syncEmployeeWorkSettingsToTenantDoctors({
-        employee: employeeRows[0],
-        assignments: assignmentRows,
-        tokens,
-        withTenantDb,
-        actor: {
-          id: req.user.sub,
-          email: req.user.email || null,
-        },
-        buildRealtimeScope,
-        broadcastPlanUpdate,
+      const syncResult = await syncEmployeeWorkSettingsForAssignments(req.user.sub, employeeRows[0], assignmentRows, {
+        id: req.user.sub,
+        email: req.user.email || null,
       });
 
       if (syncResult.failedAssignments.length > 0) {

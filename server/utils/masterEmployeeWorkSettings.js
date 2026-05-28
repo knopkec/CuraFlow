@@ -1,3 +1,17 @@
+export function resolveEmployeeTargetWeeklyHours(employee) {
+  const explicitWeeklyHours = Number(employee?.target_hours_per_week);
+  if (Number.isFinite(explicitWeeklyHours) && explicitWeeklyHours > 0) {
+    return explicitWeeklyHours;
+  }
+
+  const modelWeeklyHours = Number(employee?.model_hours_per_week);
+  if (Number.isFinite(modelWeeklyHours) && modelWeeklyHours > 0) {
+    return modelWeeklyHours;
+  }
+
+  return null;
+}
+
 export async function syncEmployeeWorkSettingsToTenantDoctors({
   employee,
   assignments = [],
@@ -10,6 +24,7 @@ export async function syncEmployeeWorkSettingsToTenantDoctors({
   const linkedAssignments = assignments.filter(
     (assignment) => assignment?.tenant_id && assignment?.tenant_doctor_id
   );
+  const resolvedWeeklyHours = resolveEmployeeTargetWeeklyHours(employee);
 
   if (!employee?.id || linkedAssignments.length === 0) {
     return {
@@ -58,7 +73,7 @@ export async function syncEmployeeWorkSettingsToTenantDoctors({
 
         if (doctorColumns.has('target_weekly_hours')) {
           updates.push('target_weekly_hours = ?');
-          params.push(employee.target_hours_per_week ?? null);
+          params.push(resolvedWeeklyHours);
         }
 
         if (doctorColumns.has('work_time_model_id')) {
