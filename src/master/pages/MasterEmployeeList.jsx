@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/api/client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -12,8 +13,77 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import {
   Users, Loader2, Building2, Search, ChevronRight, ArrowUpDown,
-  Clock, UserCheck, UserX, Plus, Upload, ArrowUpRight, Trash2, Eye, EyeOff, RefreshCw,
+  Clock, UserCheck, UserX, Plus, Upload, ArrowUpRight, Trash2, Eye, EyeOff, RefreshCw, Download,
 } from 'lucide-react';
+
+function escapeCsvValue(value) {
+  const normalized = String(value ?? '');
+  if (!/[";,\n]/.test(normalized)) {
+    return normalized;
+  }
+  return `"${normalized.replace(/"/g, '""')}"`;
+}
+
+function buildDryRunCsv(report, tenantScopeLabel) {
+  const generatedAt = new Date().toISOString();
+  const header = [
+    'generated_at',
+    'tenant_scope',
+    'total_assignments',
+    'checked_assignments',
+    'would_import_absences',
+    'already_central_absences',
+    'failed_assignments',
+    'tenant_name',
+    'tenant_id',
+    'employee_name',
+    'employee_id',
+    'tenant_doctor_id',
+    'status',
+    'local_absences',
+    'would_import',
+    'already_central',
+    'reason',
+    'error',
+  ];
+
+  const rows = (report?.results || []).map((row) => ([
+    generatedAt,
+    tenantScopeLabel,
+    report?.totalAssignments ?? 0,
+    report?.migratedAssignments ?? 0,
+    report?.importedAbsences ?? 0,
+    report?.existingCentralAbsences ?? 0,
+    report?.failedAssignments ?? 0,
+    row.tenant_name || '',
+    row.tenant_id || '',
+    row.employee_name || '',
+    row.employee_id || '',
+    row.tenant_doctor_id || '',
+    row.status || '',
+    row.localAbsences ?? 0,
+    row.imported ?? 0,
+    row.existingCentral ?? 0,
+    row.reason || '',
+    row.error || '',
+  ]));
+
+  return [header, ...rows]
+    .map((columns) => columns.map(escapeCsvValue).join(';'))
+    .join('\n');
+}
+
+function downloadCsvFile(content, fileName) {
+  const blob = new Blob([`\ufeff${content}`], { type: 'text/csv;charset=utf-8;' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
 
 export default function MasterEmployeeList() {
   const navigate = useNavigate();
@@ -24,6 +94,7 @@ export default function MasterEmployeeList() {
   const [sortField, setSortField] = useState('name');
   const [sortDir, setSortDir] = useState('asc');
   const [showInactive, setShowInactive] = useState(false); // 'central' | 'legacy'
+  const [dryRunReport, setDryRunReport] = useState(null);
 
   // Mandanten laden
   const { data: tenants = [] } = useQuery({
@@ -196,6 +267,16 @@ export default function MasterEmployeeList() {
   const linkedCentralCount = centralEmployees.filter((employee) =>
     (employee.assignments || []).some((assignment) => assignment.tenant_id && assignment.tenant_doctor_id)
   ).length;
+  const linkedAssignmentCount = useMemo(() => {
+    return centralEmployees.reduce((sum, employee) => {
+      const matchingAssignments = (employee.assignments || []).filter((assignment) => {
+        if (!assignment.tenant_id || !assignment.tenant_doctor_id) return false;
+        if (selectedTenant === 'all') return true;
+        return String(assignment.tenant_id) === String(selectedTenant);
+      });
+      return sum + matchingAssignments.length;
+    }, 0);
+  }, [centralEmployees, selectedTenant]);
   const stats = useMemo(() => ({
     centralTotal: centralEmployees.length,
     centralActive: centralEmployees.filter((e) => e.is_active).length,
@@ -253,6 +334,44 @@ export default function MasterEmployeeList() {
     onError: (err) => toast.error('Globaler Zeitkonto-Sync fehlgeschlagen: ' + err.message),
   });
 
+  const linkedAbsenceMigrationMutation = useMutation({
+    mutationFn: () => api.request('/api/master/employees/migrate-linked-absences', {
+      method: 'POST',
+      body: JSON.stringify({
+        tenant_id: selectedTenant !== 'all' ? selectedTenant : null,
+      }),
+    }),
+    onSuccess: async (result) => {
+      toast.success(
+        result.totalAssignments > 0
+          ? `Verknüpfungen geprüft: ${result.migratedAssignments}/${result.totalAssignments}, ${result.importedAbsences} Abwesenheiten zentral übernommen`
+          : 'Keine bestehenden Verknüpfungen für die Migration gefunden'
+      );
+      await queryClient.invalidateQueries({ queryKey: ['master-central-employees'] });
+      await queryClient.invalidateQueries({ queryKey: ['master-legacy-staff'] });
+    },
+    onError: (err) => toast.error('Abwesenheits-Migration fehlgeschlagen: ' + err.message),
+  });
+
+  const linkedAbsenceDryRunMutation = useMutation({
+    mutationFn: () => api.request('/api/master/employees/migrate-linked-absences', {
+      method: 'POST',
+      body: JSON.stringify({
+        tenant_id: selectedTenant !== 'all' ? selectedTenant : null,
+        dry_run: true,
+      }),
+    }),
+    onSuccess: (result) => {
+      setDryRunReport(result);
+      toast.success(
+        result.totalAssignments > 0
+          ? `Dry-Run fertig: ${result.importedAbsences} Abwesenheiten würden zentral übernommen`
+          : 'Dry-Run: keine bestehenden Verknüpfungen gefunden'
+      );
+    },
+    onError: (err) => toast.error('Dry-Run fehlgeschlagen: ' + err.message),
+  });
+
   const handleDelete = (emp, e) => {
     e.stopPropagation();
     const name = displayName(emp);
@@ -281,6 +400,26 @@ export default function MasterEmployeeList() {
     importMutation.mutate(items);
   };
 
+  const handleMigrateLinkedAbsences = () => {
+    const scopeLabel = selectedTenant === 'all' ? 'alle Mandanten' : 'den ausgewählten Mandanten';
+    if (!window.confirm(`Bestehende Verknüpfungen für ${scopeLabel} migrieren?\n\nDabei werden lokale Abwesenheiten bereits verknüpfter Mitarbeiter in die zentrale Speicherung übernommen und lokal entfernt.`)) {
+      return;
+    }
+    linkedAbsenceMigrationMutation.mutate();
+  };
+
+  const handleDryRunLinkedAbsences = () => {
+    linkedAbsenceDryRunMutation.mutate();
+  };
+
+  const handleExportDryRunReport = () => {
+    if (!dryRunReport) return;
+    const tenantScopeLabel = selectedTenant === 'all' ? 'alle-mandanten' : `tenant-${selectedTenant}`;
+    const csv = buildDryRunCsv(dryRunReport, tenantScopeLabel);
+    downloadCsvFile(csv, `dry_run_absence_migration_${tenantScopeLabel}.csv`);
+    toast.success('Dry-Run-Report exportiert');
+  };
+
   const displayName = (emp) => {
     if (emp.first_name && emp.last_name) return `${emp.first_name} ${emp.last_name}`;
     if (emp.last_name) return emp.last_name;
@@ -298,6 +437,28 @@ export default function MasterEmployeeList() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDryRunLinkedAbsences}
+            disabled={linkedAbsenceDryRunMutation.isPending || linkedAssignmentCount === 0}
+          >
+            {linkedAbsenceDryRunMutation.isPending
+              ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              : <Eye className="w-4 h-4 mr-2" />}
+            Dry-Run ({linkedAssignmentCount})
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleMigrateLinkedAbsences}
+            disabled={linkedAbsenceMigrationMutation.isPending || linkedAssignmentCount === 0}
+          >
+            {linkedAbsenceMigrationMutation.isPending
+              ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              : <Upload className="w-4 h-4 mr-2" />}
+            Verknüpfungen migrieren ({linkedAssignmentCount})
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -596,6 +757,69 @@ export default function MasterEmployeeList() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={!!dryRunReport} onOpenChange={(open) => { if (!open) setDryRunReport(null); }}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Dry-Run: Abwesenheitsmigration</DialogTitle>
+            <DialogDescription>
+              Vorschau fuer bestehende Verknuepfungen ohne Schreibzugriffe. Mandantenfilter: {selectedTenant === 'all' ? 'alle Mandanten' : 'ausgewaehlter Mandant'}.
+            </DialogDescription>
+          </DialogHeader>
+
+          {dryRunReport && (
+            <div className="space-y-4">
+              <div className="flex justify-end">
+                <Button size="sm" variant="outline" onClick={handleExportDryRunReport}>
+                  <Download className="w-4 h-4 mr-2" />
+                  Report exportieren
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <ReportStat label="Verknüpfungen" value={dryRunReport.totalAssignments} />
+                <ReportStat label="Prüfbar" value={dryRunReport.migratedAssignments} />
+                <ReportStat label="Würden importiert" value={dryRunReport.importedAbsences} />
+                <ReportStat label="Schon zentral" value={dryRunReport.existingCentralAbsences || 0} />
+                <ReportStat label="Fehler" value={dryRunReport.failedAssignments} tone="red" />
+              </div>
+
+              <ScrollArea className="h-[360px] border rounded-md">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Mandant</TableHead>
+                      <TableHead>Mitarbeiter</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Lokal</TableHead>
+                      <TableHead>Neu zentral</TableHead>
+                      <TableHead>Schon zentral</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {dryRunReport.results?.map((row, index) => (
+                      <TableRow key={`${row.tenant_id}-${row.tenant_doctor_id}-${index}`}>
+                        <TableCell>{row.tenant_name || row.tenant_id || '–'}</TableCell>
+                        <TableCell>{row.employee_name || row.employee_id || '–'}</TableCell>
+                        <TableCell>
+                          <Badge variant={row.status === 'error' ? 'destructive' : 'outline'}>
+                            {row.status === 'success' ? 'OK' : row.status === 'skipped' ? 'Übersprungen' : 'Fehler'}
+                          </Badge>
+                          {row.error ? <span className="ml-2 text-xs text-red-600">{row.error}</span> : null}
+                          {row.reason ? <span className="ml-2 text-xs text-slate-500">{row.reason}</span> : null}
+                        </TableCell>
+                        <TableCell>{row.localAbsences ?? 0}</TableCell>
+                        <TableCell>{row.imported ?? 0}</TableCell>
+                        <TableCell>{row.existingCentral ?? 0}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -617,6 +841,20 @@ function StatCard({ icon: Icon, label, value, color = 'slate' }) {
         <span className="text-xs text-slate-500">{label}</span>
       </div>
       <p className="text-2xl font-bold">{value}</p>
+    </div>
+  );
+}
+
+function ReportStat({ label, value, tone = 'slate' }) {
+  const toneMap = {
+    slate: 'bg-slate-50 text-slate-700 border-slate-200',
+    red: 'bg-red-50 text-red-700 border-red-200',
+  };
+
+  return (
+    <div className={`rounded-lg border p-3 ${toneMap[tone] || toneMap.slate}`}>
+      <div className="text-xs opacity-70">{label}</div>
+      <div className="text-xl font-semibold">{value}</div>
     </div>
   );
 }

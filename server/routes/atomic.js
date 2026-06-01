@@ -3,6 +3,15 @@ import crypto from 'crypto';
 import { authMiddleware } from './auth.js';
 import { writeAuditLog } from './dbProxy.js';
 import { broadcastPlanUpdate, buildRealtimeScope, isPlanSyncEntity } from '../utils/realtime.js';
+import { db } from '../index.js';
+import {
+  deleteCentralAbsenceById,
+  getShiftEntryWithCentralAbsence,
+  isCentralAbsencePosition,
+  listShiftEntriesWithCentralAbsences,
+  writeShiftEntryToCentralAbsence,
+} from '../utils/centralAbsences.js';
+import { resolveTenantIdFromToken } from '../utils/tenantGroups.js';
 
 const router = express.Router();
 
@@ -55,6 +64,7 @@ router.post('/', async (req, res, next) => {
       id: req.user?.sub || null,
       email: userEmail,
     };
+    const tenantId = req.dbToken ? await resolveTenantIdFromToken(db, req.dbToken) : null;
 
     // Helper: Get single record
     const getRecord = async (tableName, recordId) => {
@@ -65,8 +75,23 @@ router.post('/', async (req, res, next) => {
       return rows[0] ? fromSqlRow(rows[0]) : null;
     };
 
+    const getShiftAwareRecord = async (tableName, recordId) => {
+      if (tableName === 'ShiftEntry' && req.db) {
+        return await getShiftEntryWithCentralAbsence({ tenantDb: dbPool, masterDb: db, id: recordId });
+      }
+      return await getRecord(tableName, recordId);
+    };
+
     // Helper: Filter records
     const filterRecords = async (tableName, filter) => {
+      if (tableName === 'ShiftEntry' && req.db) {
+        return await listShiftEntriesWithCentralAbsences({
+          tenantDb: dbPool,
+          masterDb: db,
+          filters: filter,
+        });
+      }
+
       const clauses = [];
       const params = [];
       for (const [key, val] of Object.entries(filter)) {
@@ -83,6 +108,20 @@ router.post('/', async (req, res, next) => {
 
     // Helper: Create record
     const createRecord = async (tableName, createData) => {
+      if (tableName === 'ShiftEntry' && req.db && isCentralAbsencePosition(createData?.position)) {
+        const created = await writeShiftEntryToCentralAbsence({
+          tenantDb: dbPool,
+          masterDb: db,
+          tenantId,
+          shiftEntry: createData,
+          doctorId: createData.doctor_id,
+          preserveId: true,
+        });
+        if (created) {
+          return created;
+        }
+      }
+
       if (!createData.id) createData.id = crypto.randomUUID();
       createData.created_date = new Date().toISOString().slice(0, 19).replace('T', ' ');
       createData.updated_date = new Date().toISOString().slice(0, 19).replace('T', ' ');
@@ -101,6 +140,36 @@ router.post('/', async (req, res, next) => {
 
     // Helper: Update record
     const updateRecord = async (tableName, recordId, updateData) => {
+      if (tableName === 'ShiftEntry' && req.db) {
+        const current = await getShiftAwareRecord(tableName, recordId);
+        const nextPosition = updateData.position || current?.position;
+        if (current && isCentralAbsencePosition(nextPosition)) {
+          const updated = await writeShiftEntryToCentralAbsence({
+            tenantDb: dbPool,
+            masterDb: db,
+            tenantId,
+            shiftEntry: { ...current, ...updateData, id: recordId },
+            doctorId: updateData.doctor_id || current.doctor_id,
+            preserveId: true,
+          });
+          if (updated) {
+            return updated;
+          }
+        }
+        if (current && isCentralAbsencePosition(current.position) && !isCentralAbsencePosition(nextPosition)) {
+          await deleteCentralAbsenceById(db, recordId);
+          const replacement = { ...current, ...updateData, id: recordId };
+          const keys = Object.keys(replacement);
+          const values = keys.map((key) => toSqlValue(replacement[key]));
+          const placeholders = keys.map(() => '?').join(',');
+          await dbPool.execute(
+            `INSERT INTO \`${tableName}\` (\`${keys.join('`,`')}\`) VALUES (${placeholders})`,
+            values
+          );
+          return await getShiftAwareRecord(tableName, recordId);
+        }
+      }
+
       updateData.updated_date = new Date().toISOString().slice(0, 19).replace('T', ' ');
       const keys = Object.keys(updateData).filter(k => k !== 'id');
       const sets = keys.map(k => `\`${k}\` = ?`).join(',');
@@ -111,11 +180,22 @@ router.post('/', async (req, res, next) => {
         `UPDATE \`${tableName}\` SET ${sets} WHERE id = ?`, 
         values
       );
-      return await getRecord(tableName, recordId);
+      return await getShiftAwareRecord(tableName, recordId);
     };
 
     // Helper: Delete record
     const deleteRecord = async (tableName, recordId) => {
+      if (tableName === 'ShiftEntry' && req.db) {
+        const current = await getRecord(tableName, recordId);
+        if (!current) {
+          const centralCurrent = await getShiftEntryWithCentralAbsence({ tenantDb: dbPool, masterDb: db, id: recordId });
+          if (centralCurrent && isCentralAbsencePosition(centralCurrent.position)) {
+            await deleteCentralAbsenceById(db, recordId);
+            return { success: true };
+          }
+        }
+      }
+
       // Fetch record before deletion for audit log
       const [existingRows] = await dbPool.execute(`SELECT * FROM \`${tableName}\` WHERE id = ?`, [recordId]);
       const deletedRecord = existingRows[0] ? fromSqlRow(existingRows[0]) : null;
@@ -142,7 +222,7 @@ router.post('/', async (req, res, next) => {
         return res.status(400).json({ error: 'entity und id sind erforderlich' });
       }
 
-      const current = await getRecord(entity, id);
+      const current = await getShiftAwareRecord(entity, id);
       if (!current) {
         return res.status(404).json({ 
           error: 'NOT_FOUND', 

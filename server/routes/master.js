@@ -19,6 +19,11 @@ import {
   resolveEmployeeTargetWeeklyHours,
   syncEmployeeWorkSettingsToTenantDoctors,
 } from '../utils/masterEmployeeWorkSettings.js';
+import {
+  migrateLinkedAssignmentsToCentral,
+  migrateTenantDoctorAbsencesToCentral,
+  seedTenantDoctorAbsencesFromCentral,
+} from '../utils/centralAbsences.js';
 import { broadcastPlanUpdate, buildRealtimeScope } from '../utils/realtime.js';
 import { format, startOfMonth, endOfMonth, getDaysInMonth } from 'date-fns';
 import { getPublicHolidayDatesForYear, clearHolidayCache } from './holidays.js';
@@ -1225,6 +1230,75 @@ router.post('/employees/sync-time-accounts', async (req, res, next) => {
 });
 
 /**
+ * POST /api/master/employees/migrate-linked-absences
+ * Manually migrates existing absence rows for already-linked tenant doctors
+ * into the central absence storage.
+ * Body: { tenant_id?, employee_id? }
+ */
+router.post('/employees/migrate-linked-absences', async (req, res, next) => {
+  try {
+    const { tenant_id = null, employee_id = null, dry_run = false } = req.body || {};
+    const tokens = await getAllTenantTokens(req.user.sub);
+    const tokenMap = new Map(tokens.map((token) => [String(token.id), token]));
+
+    if (tenant_id && !tokenMap.has(String(tenant_id))) {
+      return res.status(403).json({ error: 'Kein Zugriff auf diesen Mandanten' });
+    }
+
+    const filters = [];
+    const params = [];
+    if (tenant_id) {
+      filters.push('eta.tenant_id = ?');
+      params.push(tenant_id);
+    }
+    if (employee_id) {
+      filters.push('eta.employee_id = ?');
+      params.push(employee_id);
+    }
+
+    const whereClause = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
+    const [assignmentRows] = await db.execute(
+      `SELECT eta.employee_id, eta.tenant_id, eta.tenant_doctor_id,
+              e.first_name, e.last_name,
+              dt.name AS tenant_name
+         FROM EmployeeTenantAssignment eta
+         LEFT JOIN Employee e ON e.id = eta.employee_id
+         LEFT JOIN db_tokens dt ON dt.id = eta.tenant_id
+         ${whereClause}
+        ORDER BY dt.name ASC, e.last_name ASC, e.first_name ASC`,
+      params
+    );
+
+    const assignments = assignmentRows
+      .filter((row) => row.tenant_id && row.tenant_doctor_id && tokenMap.has(String(row.tenant_id)))
+      .map((row) => ({
+        employee_id: row.employee_id,
+        employee_name: [row.first_name, row.last_name].filter(Boolean).join(' ').trim() || row.last_name || null,
+        tenant_id: row.tenant_id,
+        tenant_name: row.tenant_name || null,
+        tenant_doctor_id: row.tenant_doctor_id,
+      }));
+
+    const migrationResult = await migrateLinkedAssignmentsToCentral({
+      assignments,
+      tokensById: tokenMap,
+      withTenantDb,
+      masterDb: db,
+      dryRun: Boolean(dry_run),
+    });
+
+    console.log(
+      `[Master employees] ${migrationResult.dryRun ? 'Previewed' : 'Migrated'} linked absences for ${migrationResult.migratedAssignments}/${migrationResult.totalAssignments} assignment(s) by user ${req.user.sub}`
+    );
+
+    res.json(migrationResult);
+  } catch (error) {
+    console.error('[Master employees] Linked absence migration error:', error);
+    next(error);
+  }
+});
+
+/**
  * GET /api/master/employees/:id
  * Single employee detail with assignments and time accounts
  */
@@ -1747,6 +1821,14 @@ router.post('/employees/:id/link-tenant', async (req, res, next) => {
     }
 
     console.log(`[Master employees] Linked employee ${id} to tenant ${tenant_id} doctor ${doctor_id} by user ${req.user.sub}`);
+    await withTenantDb(token, async (pool) => {
+      await migrateTenantDoctorAbsencesToCentral({
+        tenantDb: pool,
+        masterDb: db,
+        tenantId: tenant_id,
+        doctorId: doctor_id,
+      });
+    });
     res.json({ success: true });
   } catch (error) {
     console.error('[Master employees] Link error:', error);
@@ -1772,6 +1854,24 @@ router.post('/employees/unlink-tenant', async (req, res, next) => {
     if (!token) {
       return res.status(403).json({ error: 'Kein Zugriff auf diesen Mandanten' });
     }
+
+    let employeeId = null;
+    await withTenantDb(token, async (pool) => {
+      const [doctorRows] = await pool.execute(
+        'SELECT central_employee_id FROM Doctor WHERE id = ? LIMIT 1',
+        [doctor_id]
+      );
+      employeeId = doctorRows[0]?.central_employee_id || null;
+      if (employeeId) {
+        await seedTenantDoctorAbsencesFromCentral({
+          tenantDb: pool,
+          masterDb: db,
+          doctorId: doctor_id,
+          employeeId,
+          createdBy: req.user?.email || 'system',
+        });
+      }
+    });
 
     await withTenantDb(token, async (pool) => {
       const [cols] = await pool.execute(

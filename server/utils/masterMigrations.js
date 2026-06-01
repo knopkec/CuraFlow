@@ -204,6 +204,31 @@ export async function runMasterMigrations(dbPool) {
     `);
   }, { duplicateCodes: ['ER_TABLE_EXISTS_ERROR'], duplicateReason: 'Tabelle bereits vorhanden' });
 
+  await run('create_central_absence_entry_table', async () => {
+    await dbPool.execute(`
+      CREATE TABLE IF NOT EXISTS CentralAbsenceEntry (
+        id VARCHAR(36) PRIMARY KEY,
+        employee_id VARCHAR(36) NOT NULL,
+        date DATE NOT NULL,
+        position VARCHAR(255) NOT NULL,
+        note TEXT,
+        start_time TIME DEFAULT NULL,
+        end_time TIME DEFAULT NULL,
+        break_minutes INT DEFAULT NULL,
+        timeslot_id VARCHAR(36) DEFAULT NULL,
+        \`order\` INT DEFAULT NULL,
+        created_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_date DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        created_by VARCHAR(255) DEFAULT NULL,
+        source_tenant_id VARCHAR(36) DEFAULT NULL,
+        source_tenant_doctor_id VARCHAR(255) DEFAULT NULL,
+        UNIQUE KEY uk_central_absence_employee_date (employee_id, date),
+        INDEX idx_central_absence_employee (employee_id),
+        INDEX idx_central_absence_date (date)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+    `);
+  }, { duplicateCodes: ['ER_TABLE_EXISTS_ERROR'], duplicateReason: 'Tabelle bereits vorhanden' });
+
   // ===== PHASE 1: Work Time Models =====
 
   await run('create_work_time_model_table', async () => {

@@ -6,6 +6,10 @@ import { authMiddleware, adminMiddleware } from './auth.js';
 import { sendEmail, getTransporter, getEmailProviderInfo } from '../utils/email.js';
 import { resolveTenantIdFromToken } from '../utils/tenantGroups.js';
 import { resolveEmployeeTargetWeeklyHours } from '../utils/masterEmployeeWorkSettings.js';
+import {
+  migrateTenantDoctorAbsencesToCentral,
+  seedTenantDoctorAbsencesFromCentral,
+} from '../utils/centralAbsences.js';
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -127,6 +131,13 @@ router.post('/central-link', async (req, res, next) => {
       );
     }
 
+    await migrateTenantDoctorAbsencesToCentral({
+      tenantDb: dbPool,
+      masterDb: db,
+      tenantId,
+      doctorId: doctor_id,
+    });
+
     res.json({ success: true });
   } catch (error) {
     next(error);
@@ -149,6 +160,22 @@ router.post('/central-unlink', async (req, res, next) => {
 
     if (!doctor_id) {
       return res.status(400).json({ error: 'doctor_id ist erforderlich' });
+    }
+
+    const [doctorRows] = await dbPool.execute(
+      'SELECT central_employee_id FROM Doctor WHERE id = ? LIMIT 1',
+      [doctor_id]
+    );
+    const employeeId = doctorRows[0]?.central_employee_id || null;
+
+    if (employeeId) {
+      await seedTenantDoctorAbsencesFromCentral({
+        tenantDb: dbPool,
+        masterDb: db,
+        doctorId: doctor_id,
+        employeeId,
+        createdBy: req.user?.email || 'system',
+      });
     }
 
     await dbPool.execute(

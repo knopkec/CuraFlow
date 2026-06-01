@@ -4,6 +4,7 @@ import { db } from '../index.js';
 import { authMiddleware } from './auth.js';
 import { format, addDays, parseISO } from 'date-fns';
 import { de } from 'date-fns/locale';
+import { listShiftEntriesWithCentralAbsences } from '../utils/centralAbsences.js';
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -57,10 +58,22 @@ router.post('/export', async (req, res, next) => {
     const dbPool = req.db || db;
 
     // Fetch all required data from database
-    const [shiftRows] = await dbPool.execute(
-      `SELECT * FROM ShiftEntry WHERE date >= ? AND date <= ? ORDER BY date, \`order\``,
-      [startDate, endDate]
-    );
+    const shiftRows = req.db
+      ? await listShiftEntriesWithCentralAbsences({
+          tenantDb: dbPool,
+          masterDb: db,
+          filters: {
+            date: {
+              $gte: startDate,
+              $lte: endDate,
+            },
+          },
+          sort: 'date',
+        })
+      : (await dbPool.execute(
+          `SELECT * FROM ShiftEntry WHERE date >= ? AND date <= ? ORDER BY date, \`order\``,
+          [startDate, endDate]
+        ))[0];
     
     const [doctorRows] = await dbPool.execute(`SELECT * FROM Doctor`);
     const [workplaceRows] = await dbPool.execute(`SELECT * FROM Workplace ORDER BY \`order\``);
