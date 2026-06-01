@@ -7,6 +7,36 @@
  */
 import { clearColumnsCache } from './schema.js';
 
+const FATAL_TENANT_MIGRATION_ERROR_CODES = new Set([
+  'ER_ACCESS_DENIED_ERROR',
+  'ER_DBACCESS_DENIED_ERROR',
+  'PROTOCOL_CONNECTION_LOST',
+  'PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR',
+  'PROTOCOL_ENQUEUE_AFTER_QUIT',
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EPIPE',
+]);
+
+const FATAL_TENANT_MIGRATION_ERROR_PATTERNS = [
+  /pool is closed/i,
+  /closed state/i,
+  /can't add new command when connection is in closed state/i,
+  /can't add new command when connection is closed/i,
+  /the client was disconnected by the server/i,
+];
+
+function isFatalTenantMigrationError(error) {
+  if (!error) return false;
+  if (FATAL_TENANT_MIGRATION_ERROR_CODES.has(error.code)) {
+    return true;
+  }
+
+  const message = `${error.message || ''} ${error.sqlMessage || ''}`.trim();
+  return FATAL_TENANT_MIGRATION_ERROR_PATTERNS.some((pattern) => pattern.test(message));
+}
+
 export async function runTenantMigrations(dbPool, cacheKey = 'default') {
   const results = [];
 
@@ -17,6 +47,8 @@ export async function runTenantMigrations(dbPool, cacheKey = 'default') {
     } catch (err) {
       if (err.code === 'ER_DUP_FIELDNAME') {
         results.push({ migration: name, status: 'skipped', reason: 'Column already exists' });
+      } else if (isFatalTenantMigrationError(err)) {
+        throw err;
       } else {
         results.push({ migration: name, status: 'error', error: err.message });
       }
@@ -30,6 +62,8 @@ export async function runTenantMigrations(dbPool, cacheKey = 'default') {
     } catch (err) {
       if (err.code === 'ER_TABLE_EXISTS_ERROR') {
         results.push({ migration: name, status: 'skipped', reason: 'Table already exists' });
+      } else if (isFatalTenantMigrationError(err)) {
+        throw err;
       } else {
         results.push({ migration: name, status: 'error', error: err.message });
       }
@@ -43,6 +77,8 @@ export async function runTenantMigrations(dbPool, cacheKey = 'default') {
     } catch (err) {
       if (err.code === 'ER_DUP_KEYNAME') {
         results.push({ migration: name, status: 'skipped', reason: 'Index already exists' });
+      } else if (isFatalTenantMigrationError(err)) {
+        throw err;
       } else {
         results.push({ migration: name, status: 'error', error: err.message });
       }
@@ -183,6 +219,8 @@ export async function runTenantMigrations(dbPool, cacheKey = 'default') {
   } catch (err) {
     if (err.code === 'ER_DUP_FIELDNAME') {
       results.push({ migration: 'add_workplace_service_type', status: 'skipped', reason: 'Column already exists' });
+    } else if (isFatalTenantMigrationError(err)) {
+      throw err;
     } else {
       results.push({ migration: 'add_workplace_service_type', status: 'error', error: err.message });
     }
@@ -254,6 +292,8 @@ export async function runTenantMigrations(dbPool, cacheKey = 'default') {
   } catch (e) {
     if (e.code === 'ER_DUP_KEYNAME') {
       results.push({ migration: 'add_uk_shortcode_model', status: 'skipped', reason: 'Unique key already exists' });
+    } else if (isFatalTenantMigrationError(e)) {
+      throw e;
     } else {
       results.push({ migration: 'add_uk_shortcode_model', status: 'error', error: e.message });
     }

@@ -2,7 +2,7 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { db } from '../index.js';
+import { db, removeTenantPool } from '../index.js';
 import { runMasterMigrations } from '../utils/masterMigrations.js';
 import { authMiddleware, adminMiddleware } from './auth.js';
 import { clearColumnsCache, writeAuditLog } from './dbProxy.js';
@@ -1189,6 +1189,11 @@ router.put('/db-tokens/:id', async (req, res, next) => {
       SET name = ?, token = ?, host = ?, db_name = ?, description = ?, updated_date = NOW()
       WHERE id = ?
     `, [name?.trim() || existing[0].name, encryptedToken, host, dbName, description ?? existing[0].description, id]);
+
+    removeTenantPool(existing[0].token);
+    if (encryptedToken !== existing[0].token) {
+      removeTenantPool(encryptedToken);
+    }
     
     console.log(`[DB-Tokens] Updated token "${name || existing[0].name}" by ${req.user.email}`);
     
@@ -1209,8 +1214,14 @@ router.delete('/db-tokens/:id', async (req, res, next) => {
     if (existing.length === 0) {
       return res.status(404).json({ error: 'Token nicht gefunden' });
     }
+
+    const [existingTokenRows] = await db.execute('SELECT token FROM db_tokens WHERE id = ?', [id]);
     
     await db.execute('DELETE FROM db_tokens WHERE id = ?', [id]);
+
+    if (existingTokenRows[0]?.token) {
+      removeTenantPool(existingTokenRows[0].token);
+    }
     
     const tokenTimestamp = new Date().toISOString();
     console.log(`[AUDIT][DELETE][DB-TOKEN] ${tokenTimestamp} | User: ${req.user.email} | Token: "${existing[0].name}" | ID: ${id}`);

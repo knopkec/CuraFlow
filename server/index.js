@@ -349,6 +349,7 @@ export const tenantDbMiddleware = async (req, res, next) => {
           })
           .catch((err) => {
             console.error('[Auto-Migration] Failed:', err.message);
+            throw err;
           })
           .finally(() => {
             migrationInFlight.delete(dbToken);
@@ -356,9 +357,14 @@ export const tenantDbMiddleware = async (req, res, next) => {
         migrationInFlight.set(dbToken, promise);
       }
       await migrationInFlight.get(dbToken);
+      req.db = getTenantDb(dbToken);
+      req.isCustomDb = !!dbToken && req.db !== db;
     } catch (err) {
-      // Non-blocking: don't prevent tenant access on migration failure
       console.error('[Auto-Migration] Unexpected error:', err.message);
+      if (dbToken) {
+        removeTenantPool(dbToken);
+      }
+      return next(err);
     }
   }
 
