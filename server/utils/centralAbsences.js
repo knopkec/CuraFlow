@@ -417,8 +417,16 @@ export async function migrateTenantDoctorAbsencesToCentral({
   const absenceRows = tenantRows.filter((row) => isCentralAbsencePosition(row.position));
 
   let imported = 0;
+  const skippedInvalidDate = [];
   for (const row of absenceRows) {
     const date = toDateString(row.date);
+    // CentralAbsenceEntry.date is NOT NULL. Skip rows that have a null/empty
+    // date so we never crash the whole migration on bad tenant data. These
+    // rows stay on the tenant side until the admin fixes the source.
+    if (!date) {
+      skippedInvalidDate.push({ id: row.id, position: row.position });
+      continue;
+    }
     const [existingRows] = await masterDb.execute(
       'SELECT id FROM CentralAbsenceEntry WHERE employee_id = ? AND date = ? LIMIT 1',
       [employeeId, date]
@@ -438,6 +446,23 @@ export async function migrateTenantDoctorAbsencesToCentral({
     imported += 1;
   }
 
+  // Never partially migrate: if any local absence could not be moved (bad
+  // date, write failure that we caught, etc.) we keep the local rows in
+  // place so the user does not silently lose data. The admin can fix the
+  // offending row and re-run.
+  if (skippedInvalidDate.length > 0) {
+    console.warn(
+      `[Master absences] Skipped ${skippedInvalidDate.length} tenant absence row(s) for doctor ${doctorId} (employee ${employeeId}) due to invalid date:`,
+      skippedInvalidDate
+    );
+    return {
+      imported,
+      removedLocal: 0,
+      skippedInvalidDate,
+      localAbsences: absenceRows.length,
+    };
+  }
+
   await tenantDb.execute(
     `DELETE FROM ShiftEntry
       WHERE doctor_id = ?
@@ -445,7 +470,7 @@ export async function migrateTenantDoctorAbsencesToCentral({
     [doctorId, ...Array.from(CENTRAL_ABSENCE_POSITIONS)]
   );
 
-  return { imported, removedLocal: absenceRows.length };
+  return { imported, removedLocal: absenceRows.length, skippedInvalidDate: [] };
 }
 
 export async function previewTenantDoctorAbsenceMigration({
@@ -475,8 +500,13 @@ export async function previewTenantDoctorAbsenceMigration({
 
   let imported = 0;
   let existingCentral = 0;
+  const skippedInvalidDate = [];
   for (const row of absenceRows) {
     const date = toDateString(row.date);
+    if (!date) {
+      skippedInvalidDate.push({ id: row.id, position: row.position });
+      continue;
+    }
     const [existingRows] = await masterDb.execute(
       'SELECT id FROM CentralAbsenceEntry WHERE employee_id = ? AND date = ? LIMIT 1',
       [employeeId, date]
@@ -493,6 +523,7 @@ export async function previewTenantDoctorAbsenceMigration({
     removedLocal: absenceRows.length,
     localAbsences: absenceRows.length,
     existingCentral,
+    skippedInvalidDate,
   };
 }
 

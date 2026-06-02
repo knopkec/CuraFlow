@@ -245,8 +245,74 @@ describe('central absences', () => {
       doctorId: 'doc-1',
     });
 
-    expect(result).toEqual({ imported: 1, removedLocal: 2 });
+    expect(result).toEqual({ imported: 1, removedLocal: 2, skippedInvalidDate: [] });
     expect(masterDb.calls.filter(({ sql }) => sql.startsWith('INSERT INTO CentralAbsenceEntry'))).toHaveLength(1);
+  });
+
+  it('skips absence rows with invalid dates and never deletes local data partially', async () => {
+    const inserts = [];
+    const tenantDb = {
+      async execute(sql) {
+        if (sql.startsWith('SELECT central_employee_id FROM Doctor')) {
+          return [[{ central_employee_id: 'emp-1' }], []];
+        }
+        if (sql.startsWith('SELECT * FROM ShiftEntry WHERE doctor_id = ?')) {
+          return [[
+            { id: 'absence-bad', doctor_id: 'doc-1', date: null, position: 'Urlaub' },
+            { id: 'absence-empty', doctor_id: 'doc-1', date: '', position: 'Krank' },
+            { id: 'absence-good', doctor_id: 'doc-1', date: '2026-04-01', position: 'Frei' },
+          ], []];
+        }
+        if (sql.startsWith('DELETE FROM ShiftEntry')) {
+          throw new Error('Should not delete any local rows when invalid-date rows exist');
+        }
+        throw new Error(`Unexpected tenant SQL: ${sql}`);
+      },
+    };
+    const masterDb = {
+      async execute(sql, params = []) {
+        if (sql.includes('CREATE TABLE IF NOT EXISTS CentralAbsenceEntry')) {
+          return [[], []];
+        }
+        if (sql.startsWith('SELECT id FROM CentralAbsenceEntry WHERE employee_id = ? AND date = ?')) {
+          return [[], []];
+        }
+        if (sql.startsWith('INSERT INTO CentralAbsenceEntry')) {
+          inserts.push(params);
+          return [{ affectedRows: 1 }, []];
+        }
+        if (sql.startsWith('SELECT `id`, `employee_id`, `date`, `position`')) {
+          return [[{
+            id: params[0], employee_id: params[1], date: '2026-04-01', position: 'Frei',
+            note: null, start_time: null, end_time: null, break_minutes: null,
+            timeslot_id: null, order: null,
+            created_date: '2026-04-01 09:00:00', updated_date: '2026-04-01 09:00:00',
+            created_by: null, source_tenant_id: 'tenant-1', source_tenant_doctor_id: 'doc-1',
+          }], []];
+        }
+        throw new Error(`Unexpected master SQL: ${sql}`);
+      },
+    };
+
+    const result = await migrateTenantDoctorAbsencesToCentral({
+      tenantDb,
+      masterDb,
+      tenantId: 'tenant-1',
+      doctorId: 'doc-1',
+    });
+
+    // Valid rows are migrated; invalid-date rows are skipped. The local DELETE
+    // is suppressed because we must never partially migrate.
+    expect(result).toEqual({
+      imported: 1,
+      removedLocal: 0,
+      skippedInvalidDate: [
+        { id: 'absence-bad', position: 'Urlaub' },
+        { id: 'absence-empty', position: 'Krank' },
+      ],
+      localAbsences: 3,
+    });
+    expect(inserts.map((params) => params[0])).toEqual(['absence-good']);
   });
 
   it('previews how many local absences would move to central storage', async () => {
@@ -264,6 +330,7 @@ describe('central absences', () => {
       removedLocal: 2,
       localAbsences: 2,
       existingCentral: 1,
+      skippedInvalidDate: [],
     });
     expect(masterDb.calls.filter(({ sql }) => sql.startsWith('INSERT INTO CentralAbsenceEntry'))).toHaveLength(0);
   });
