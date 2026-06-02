@@ -31,6 +31,44 @@ const CENTRAL_ABSENCE_POSITIONS_NORMALIZED = new Set([
   'mutterschutz',
 ]);
 
+// Conflict resolution priority for central absence storage. Higher number =
+// stronger reason for the day to be this kind of absence. Used by the
+// opt-in `resolveConflicts` pass to decide which side wins when a local
+// absence row and an existing central row share the same (employee, date)
+// but disagree on the position. The strongest legally/medically binding
+// reason wins; soft planning entries (Frei/Urlaub) yield to anything
+// stricter. Ties (same priority, different position) are NEVER auto-resolved
+// — the admin must fix them in the tenant.
+const ABSENCE_PRIORITY = {
+  Mutterschutz: 100,
+  Elternzeit: 90,
+  Krank: 80,
+  Fortbildung: 60,
+  Kongress: 55,
+  Dienstreise: 40,
+  'Nicht verfügbar': 30,
+  Urlaub: 20,
+  Frei: 10,
+};
+
+const absencePriority = (position) => {
+  if (position === null || position === undefined) return 0;
+  // Look up by canonical PascalCase first, then by the normalized form so
+  // legacy lowercase/umlaut-stripped spellings resolve to the same priority.
+  if (Object.prototype.hasOwnProperty.call(ABSENCE_PRIORITY, position)) {
+    return ABSENCE_PRIORITY[position];
+  }
+  const normalized = normalizeShiftPosition(position);
+  for (const [key, value] of Object.entries(ABSENCE_PRIORITY)) {
+    if (normalizeShiftPosition(key) === normalized) {
+      return value;
+    }
+  }
+  return 0;
+};
+
+export { ABSENCE_PRIORITY, absencePriority };
+
 const normalizeShiftPosition = (position) => {
   if (position === null || position === undefined) return '';
   return String(position)
@@ -453,12 +491,25 @@ export async function deleteCentralAbsenceById(masterDb, id) {
   await masterDb.execute('DELETE FROM CentralAbsenceEntry WHERE id = ?', [id]);
 }
 
+// Update the position of a central absence entry in place. Used by the
+// resolve-conflicts pass when a local absence has a higher priority than
+// the central one for the same (employee, date). The updated_date column
+// is bumped automatically by the table's ON UPDATE CURRENT_TIMESTAMP.
+export async function updateCentralAbsencePosition(masterDb, id, position) {
+  await ensureCentralAbsenceTables(masterDb);
+  await masterDb.execute(
+    'UPDATE CentralAbsenceEntry SET position = ? WHERE id = ?',
+    [position, id]
+  );
+}
+
 export async function migrateTenantDoctorAbsencesToCentral({
   tenantDb,
   masterDb,
   tenantId,
   doctorId,
   employeeId: masterEmployeeId = null,
+  resolveConflicts = false,
 }) {
   const [doctorRows] = await tenantDb.execute(
     'SELECT central_employee_id FROM Doctor WHERE id = ? LIMIT 1',
@@ -555,13 +606,56 @@ export async function migrateTenantDoctorAbsencesToCentral({
       } else {
         // A different absence already occupies this day. The central unique
         // key is (employee_id, date), so we cannot move ours without
-        // overwriting. Keep the local row and report the conflict.
-        conflicts.push({
-          id: row.id,
-          date,
-          localPosition: row.position,
-          centralPosition: existingRows[0].position,
-        });
+        // overwriting. Keep the local row and report the conflict unless
+        // resolveConflicts is on AND the local row has a strictly higher
+        // priority (medically/legally binding reasons beat planning entries)
+        // — then update the central row in place and drop the local copy.
+        // A tie is NEVER auto-resolved: the admin must fix the tenant.
+        const localPrio = absencePriority(row.position);
+        const centralPrio = absencePriority(existingRows[0].position);
+        if (resolveConflicts && localPrio > centralPrio) {
+          await updateCentralAbsencePosition(masterDb, existingRows[0].id, row.position);
+          console.warn(
+            `[Master absences] Resolved conflict: doctor=${doctorId} employee=${employeeId} date=${date} central "${existingRows[0].position}" (prio ${centralPrio}) ← local "${row.position}" (prio ${localPrio})`
+          );
+          conflicts.push({
+            id: row.id,
+            date,
+            localPosition: row.position,
+            centralPosition: existingRows[0].position,
+            resolution: 'local_wins',
+            resolvedByPriority: { local: localPrio, central: centralPrio },
+          });
+          // The local row is no longer needed; the central store now holds
+          // the higher-priority position and the read-merge keeps it visible.
+          // We delete the local copy as part of the regular removableIds
+          // batch so we do not need a separate DELETE here.
+          redundantIds.push(row.id);
+        } else if (resolveConflicts && centralPrio > localPrio) {
+          // Central already has a stronger reason for this day. Drop the
+          // local copy — the read-merge keeps the central row visible.
+          console.warn(
+            `[Master absences] Resolved conflict: doctor=${doctorId} employee=${employeeId} date=${date} central "${existingRows[0].position}" (prio ${centralPrio}) kept, local "${row.position}" (prio ${localPrio}) dropped`
+          );
+          conflicts.push({
+            id: row.id,
+            date,
+            localPosition: row.position,
+            centralPosition: existingRows[0].position,
+            resolution: 'central_wins',
+            resolvedByPriority: { local: localPrio, central: centralPrio },
+          });
+          redundantIds.push(row.id);
+        } else {
+          conflicts.push({
+            id: row.id,
+            date,
+            localPosition: row.position,
+            centralPosition: existingRows[0].position,
+            resolution: 'unresolved',
+            resolvedByPriority: { local: localPrio, central: centralPrio },
+          });
+        }
       }
       continue;
     }
@@ -595,10 +689,13 @@ export async function migrateTenantDoctorAbsencesToCentral({
   }
 
   // Delete by id list so we cover position-spelling variants (PascalCase,
-  // lowercase, umlaut-stripped). We remove both the rows we just imported AND
-  // the redundant leftovers whose exact central duplicate already exists —
-  // never the conflict rows (a different central absence occupies that day)
-  // and never the invalid-date rows (kept for the admin to fix).
+  // lowercase, umlaut-stripped). We remove the rows we just imported, the
+  // redundant leftovers whose exact central duplicate already exists, AND
+  // the conflict rows that the resolveConflicts pass has settled
+  // (local_wins → local copy is now redundant; central_wins → local copy
+  // yields to the stronger central row). We never touch invalid-date rows
+  // (kept for the admin to fix) and we never touch unresolved ties (admin
+  // must resolve by hand).
   const removableIds = [...migratedIds, ...redundantIds];
   if (removableIds.length > 0) {
     await tenantDb.execute(
@@ -615,6 +712,16 @@ export async function migrateTenantDoctorAbsencesToCentral({
   );
   const centralTotal = Number(centralCountRows[0]?.total || 0);
 
+  const resolvedConflicts = conflicts.filter((entry) => entry.resolution === 'local_wins' || entry.resolution === 'central_wins').length;
+  const unresolvedConflicts = conflicts.filter((entry) => entry.resolution === 'unresolved' || !entry.resolution).length;
+  const conflictExamples = conflicts.slice(0, 5).map((entry) => ({
+    id: entry.id,
+    date: entry.date,
+    localPosition: entry.localPosition,
+    centralPosition: entry.centralPosition,
+    resolution: entry.resolution || 'unresolved',
+  }));
+
   return {
     imported,
     removedLocal: removableIds.length,
@@ -623,6 +730,9 @@ export async function migrateTenantDoctorAbsencesToCentral({
     existingCentral,
     centralTotal,
     conflicts: conflicts.length,
+    resolvedConflicts,
+    unresolvedConflicts,
+    conflictExamples,
     linkStatus: linkRepaired ? 'repaired' : 'ok',
     linkRepaired,
   };
@@ -775,6 +885,10 @@ export async function previewTenantDoctorAbsenceMigration({
   let existingCentral = 0;
   const skippedInvalidDate = [];
   let conflicts = 0;
+  let wouldResolveLocal = 0;
+  let wouldResolveCentral = 0;
+  let unresolvedConflicts = 0;
+  const conflictExamples = [];
   for (const row of absenceRows) {
     const classified = classifyInvalidDate(row.date);
     if (!classified.normalized) {
@@ -797,6 +911,25 @@ export async function previewTenantDoctorAbsenceMigration({
         existingCentral += 1;
       } else {
         conflicts += 1;
+        const localPrio = absencePriority(row.position);
+        const centralPrio = absencePriority(existingRows[0].position);
+        if (localPrio > centralPrio) {
+          wouldResolveLocal += 1;
+        } else if (centralPrio > localPrio) {
+          wouldResolveCentral += 1;
+        } else {
+          unresolvedConflicts += 1;
+        }
+        if (conflictExamples.length < 5) {
+          conflictExamples.push({
+            id: row.id,
+            date,
+            localPosition: row.position,
+            centralPosition: existingRows[0].position,
+            localPriority: localPrio,
+            centralPriority: centralPrio,
+          });
+        }
       }
       continue;
     }
@@ -816,6 +949,10 @@ export async function previewTenantDoctorAbsenceMigration({
     existingCentral,
     centralTotal,
     conflicts,
+    wouldResolveLocal,
+    wouldResolveCentral,
+    unresolvedConflicts,
+    conflictExamples,
     skippedInvalidDate,
     linkStatus: linkRepairNeeded ? 'repair_needed' : 'ok',
   };
@@ -890,6 +1027,7 @@ export async function migrateLinkedAssignmentsToCentral({
   masterDb,
   dryRun = false,
   purgeEmptyDates = false,
+  resolveConflicts = false,
 }) {
   const results = [];
   let migratedAssignments = 0;
@@ -899,6 +1037,8 @@ export async function migrateLinkedAssignmentsToCentral({
   let failedAssignments = 0;
   let existingCentralAbsences = 0;
   let purgedEmptyAbsences = 0;
+  let resolvedConflicts = 0;
+  let unresolvedConflicts = 0;
 
   for (const assignment of assignments || []) {
     const tenantId = String(assignment.tenant_id || '');
@@ -934,6 +1074,7 @@ export async function migrateLinkedAssignmentsToCentral({
               tenantId,
               doctorId,
               employeeId: assignment.employee_id || null,
+              resolveConflicts,
             });
         // Opt-in second pass: delete tenant absence rows whose date is
         // genuinely empty (null/empty string) and whose position is a known
@@ -982,13 +1123,32 @@ export async function migrateLinkedAssignmentsToCentral({
       const purgeResult = migrationResult.purgeResult || { purged: 0, skipped: [] };
       const purgedForRow = Number(purgeResult.purged || 0);
       purgedEmptyAbsences += purgedForRow;
+      // Conflict resolution accounting. In a real pass with resolveConflicts
+      // on, resolvedConflicts counts the (employee, date) pairs that were
+      // auto-settled by priority; unresolvedConflicts counts ties or rows the
+      // admin still has to fix by hand. In a dry-run we use the
+      // wouldResolveLocal/Right counters from the preview instead.
+      const resolvedForRow = dryRun
+        ? Number(migrationResult.wouldResolveLocal || 0) + Number(migrationResult.wouldResolveCentral || 0)
+        : Number(migrationResult.resolvedConflicts || 0);
+      const unresolvedForRow = Number(migrationResult.unresolvedConflicts || 0);
+      resolvedConflicts += resolvedForRow;
+      unresolvedConflicts += unresolvedForRow;
+      const conflictExamples = Array.isArray(migrationResult.conflictExamples) ? migrationResult.conflictExamples : [];
+      const conflictSummary = conflictExamples
+        .slice(0, 5)
+        .map((entry) => {
+          const resolution = entry.resolution || (entry.localPriority > entry.centralPriority ? 'lokal gewinnt' : entry.centralPriority > entry.localPriority ? 'zentral gewinnt' : 'unentschieden');
+          return `${entry.date}: ${entry.localPosition} vs ${entry.centralPosition} → ${resolution}`;
+        })
+        .join('; ') + (conflicts > 5 ? ` (+${conflicts - 5} weitere)` : '');
       // "Not yet fully migrated" means the doctor still has local absence rows.
       // The purge pass ran AFTER the local-count snapshot from the migration,
       // so subtract both the regular removals and the purged empties.
       const remainingLocal = Math.max(0, localAbsencesCount - removedLocal - purgedForRow);
       const needsAction = dryRun
         ? localAbsencesCount > 0
-        : remainingLocal > 0;
+        : (remainingLocal > 0 || unresolvedForRow > 0);
       results.push({
         employee_id: assignment.employee_id,
         employee_name: assignment.employee_name || null,
@@ -1006,6 +1166,9 @@ export async function migrateLinkedAssignmentsToCentral({
         existingCentral: Number(migrationResult.existingCentral || 0),
         centralTotal: Number(migrationResult.centralTotal || 0),
         conflicts,
+        resolvedConflicts: resolvedForRow,
+        unresolvedConflicts: unresolvedForRow,
+        conflictSummary,
         needsAction,
         linkStatus: migrationResult.linkStatus || 'ok',
         dry_run: dryRun,
@@ -1030,6 +1193,8 @@ export async function migrateLinkedAssignmentsToCentral({
     importedAbsences,
     removedLocalAbsences,
     purgedEmptyAbsences,
+    resolvedConflicts,
+    unresolvedConflicts,
     existingCentralAbsences,
     skippedAssignments,
     failedAssignments,

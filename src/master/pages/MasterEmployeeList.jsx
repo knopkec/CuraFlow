@@ -57,6 +57,11 @@ function buildDryRunCsv(report, tenantScopeLabel) {
     'skipped_invalid_date',
     'skipped_invalid_date_detail',
     'conflicts',
+    'would_resolve_local',
+    'would_resolve_central',
+    'resolved_conflicts',
+    'unresolved_conflicts',
+    'conflict_summary',
     'needs_action',
     'reason',
     'error',
@@ -86,6 +91,11 @@ function buildDryRunCsv(report, tenantScopeLabel) {
     row.skippedInvalidDate ?? 0,
     row.skippedInvalidDateSummary || '',
     row.conflicts ?? 0,
+    row.wouldResolveLocal ?? 0,
+    row.wouldResolveCentral ?? 0,
+    row.resolvedConflicts ?? 0,
+    row.unresolvedConflicts ?? 0,
+    row.conflictSummary || '',
     row.needsAction ? 'yes' : 'no',
     row.reason || '',
     row.error || '',
@@ -359,11 +369,12 @@ export default function MasterEmployeeList() {
   });
 
   const linkedAbsenceMigrationMutation = useMutation({
-    mutationFn: ({ purgeEmptyDates = false } = {}) => api.request('/api/master/employees/migrate-linked-absences', {
+    mutationFn: ({ purgeEmptyDates = false, resolveConflicts = false } = {}) => api.request('/api/master/employees/migrate-linked-absences', {
       method: 'POST',
       body: JSON.stringify({
         tenant_id: selectedTenant !== 'all' ? selectedTenant : null,
         purge_empty_dates: purgeEmptyDates,
+        resolve_conflicts: resolveConflicts,
       }),
     }),
     onSuccess: async (result) => {
@@ -375,6 +386,12 @@ export default function MasterEmployeeList() {
         ];
         if (Number(result.purgedEmptyAbsences || 0) > 0) {
           parts.push(`${result.purgedEmptyAbsences} leere Einträge gelöscht`);
+        }
+        if (Number(result.resolvedConflicts || 0) > 0) {
+          parts.push(`${result.resolvedConflicts} Konflikte aufgelöst`);
+        }
+        if (Number(result.unresolvedConflicts || 0) > 0) {
+          parts.push(`${result.unresolvedConflicts} Konflikte offen (Pattsituation)`);
         }
         if (result.failedAssignments > 0) {
           parts.push(`${result.failedAssignments} fehlgeschlagen`);
@@ -460,6 +477,15 @@ export default function MasterEmployeeList() {
     linkedAbsenceMigrationMutation.mutate({ purgeEmptyDates: true });
   };
 
+  const handleMigrateAndResolveConflicts = () => {
+    const scopeLabel = selectedTenant === 'all' ? 'alle Mandanten' : 'den ausgewählten Mandanten';
+    const message = `Bestehende Verknüpfungen für ${scopeLabel} migrieren UND Konflikte am selben Tag nach Priorität auflösen?\n\nEs gilt diese Hierarchie (höher gewinnt):\n  Mutterschutz (100) > Elternzeit (90) > Krank (80) > Fortbildung (60) > Kongress (55) > Dienstreise (40) > Nicht verfügbar (30) > Urlaub (20) > Frei (10)\n\nSchritt 1: Reguläre Migration.\nSchritt 2: Für jeden Tag, an dem Mandant und Zentrale unterschiedliche Abwesenheits-Positionen halten, gewinnt die Position mit der höheren Priorität. Der zentrale Eintrag wird ggf. aktualisiert, die lokale Zeile gelöscht.\n\nPattsituationen (z. B. 'Urlaub vs. Frei', beides unbekannter Wert) werden NICHT aufgelöst – diese Zeilen bleiben als 'Konflikte offen' in der Tabelle sichtbar und müssen im Mandanten korrigiert werden.`;
+    if (!window.confirm(message)) {
+      return;
+    }
+    linkedAbsenceMigrationMutation.mutate({ resolveConflicts: true });
+  };
+
   const handleDryRunLinkedAbsences = () => {
     linkedAbsenceDryRunMutation.mutate();
   };
@@ -522,6 +548,18 @@ export default function MasterEmployeeList() {
               ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
               : <Trash2 className="w-4 h-4 mr-2" />}
             Migrieren + leere Einträge löschen
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleMigrateAndResolveConflicts}
+            disabled={linkedAbsenceMigrationMutation.isPending || linkedAssignmentCount === 0}
+            title="Migriert und löst Konflikte am selben Tag nach Abwesenheits-Priorität auf"
+          >
+            {linkedAbsenceMigrationMutation.isPending
+              ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              : <ArrowUpDown className="w-4 h-4 mr-2" />}
+            Migrieren + Konflikte auflösen
           </Button>
           <Button
             variant="outline"
@@ -840,11 +878,27 @@ export default function MasterEmployeeList() {
                 </Button>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
                 <ReportStat label="Verknüpfungen" value={dryRunReport.totalAssignments} />
                 <ReportStat label="Noch nicht migriert" value={dryRunReport.assignmentsNeedingAction ?? 0} tone={dryRunReport.assignmentsNeedingAction ? 'amber' : 'green'} />
                 <ReportStat label="Würden importiert" value={dryRunReport.importedAbsences} />
                 <ReportStat label="Konflikte" value={dryRunReport.conflictAssignments || 0} tone={dryRunReport.conflictAssignments ? 'amber' : undefined} />
+                <ReportStat
+                  label="Davon auflösbar"
+                  value={(() => {
+                    const rows = dryRunReport.results || [];
+                    return rows.reduce(
+                      (sum, row) => sum + Number(row.wouldResolveLocal || 0) + Number(row.wouldResolveCentral || 0),
+                      0
+                    );
+                  })()}
+                  tone="amber"
+                />
+                <ReportStat
+                  label="Offen (Pattsituation)"
+                  value={(dryRunReport.results || []).reduce((sum, row) => sum + Number(row.unresolvedConflicts || 0), 0)}
+                  tone="red"
+                />
                 <ReportStat label="Fehler" value={dryRunReport.failedAssignments} tone="red" />
               </div>
 
@@ -892,7 +946,21 @@ export default function MasterEmployeeList() {
                             <span className="ml-2 text-xs text-amber-600">{LINK_STATUS_LABELS[row.linkStatus] || row.linkStatus}</span>
                           ) : null}
                           {Number(row.conflicts || 0) > 0 ? (
-                            <span className="ml-2 text-xs text-amber-600">{row.conflicts} Konflikt(e) am selben Tag</span>
+                            <div className="ml-2 inline-flex flex-col gap-0.5 text-xs">
+                              <span className="text-amber-700">{row.conflicts} Konflikt(e) am selben Tag</span>
+                              {Number(row.wouldResolveLocal || 0) + Number(row.wouldResolveCentral || 0) > 0 ? (
+                                <span className="text-amber-600">
+                                  {Number(row.wouldResolveLocal || 0) + Number(row.wouldResolveCentral || 0)} nach Priorität auflösbar
+                                </span>
+                              ) : null}
+                              {Number(row.resolvedConflicts || 0) > 0 ? (
+                                <span className="text-emerald-600">{row.resolvedConflicts} aufgelöst (höhere Priorität gewonnen)</span>
+                              ) : null}
+                              {Number(row.unresolvedConflicts || 0) > 0 ? (
+                                <span className="text-red-600">{row.unresolvedConflicts} offen (Pattsituation)</span>
+                              ) : null}
+                              {row.conflictSummary ? <span className="text-slate-500">{row.conflictSummary}</span> : null}
+                            </div>
                           ) : null}
                           {Number(row.skippedInvalidDate || 0) > 0 ? (
                             <span className="ml-2 text-xs text-amber-600">
