@@ -84,19 +84,12 @@ function createMigrationTenantDb() {
       }
 
       if (sql.startsWith('DELETE FROM ShiftEntry')) {
-        expect(params).toEqual([
-          'doc-1',
-          'Urlaub',
-          'Krank',
-          'Frei',
-          'Dienstreise',
-          'Nicht verfügbar',
-          'Fortbildung',
-          'Kongress',
-          'Elternzeit',
-          'Mutterschutz',
-        ]);
-        return [{ affectedRows: 2 }, []];
+        // Migration deletes only the rows that were actually imported. In
+        // the fixture only 'absence-1' gets imported (absence-2 already
+        // exists centrally, duty-1 is not an absence). Other DELETE shapes
+        // (e.g. the seed-back path) are handled by their own tests.
+        expect(params).toEqual(['absence-1']);
+        return [{ affectedRows: 1 }, []];
       }
 
       throw new Error(`Unexpected tenant SQL: ${sql}`);
@@ -245,7 +238,7 @@ describe('central absences', () => {
       doctorId: 'doc-1',
     });
 
-    expect(result).toEqual({ imported: 1, removedLocal: 2, skippedInvalidDate: [] });
+    expect(result).toEqual({ imported: 1, removedLocal: 1, skippedInvalidDate: [] });
     expect(masterDb.calls.filter(({ sql }) => sql.startsWith('INSERT INTO CentralAbsenceEntry'))).toHaveLength(1);
   });
 
@@ -313,6 +306,117 @@ describe('central absences', () => {
       localAbsences: 3,
     });
     expect(inserts.map((params) => params[0])).toEqual(['absence-good']);
+  });
+
+  it('treats lowercase and umlaut-stripped positions as absences', async () => {
+    const tenantDb = {
+      async execute(sql, params = []) {
+        if (sql.startsWith('SELECT central_employee_id FROM Doctor')) {
+          return [[{ central_employee_id: 'emp-1' }], []];
+        }
+        if (sql.startsWith('SELECT * FROM ShiftEntry WHERE doctor_id = ?')) {
+          return [[
+            { id: 'lower-urlaub', doctor_id: 'doc-1', date: '2026-05-10', position: 'urlaub' },
+            { id: 'strip-umlaute', doctor_id: 'doc-1', date: '2026-05-11', position: 'nicht verfuegbar' },
+            { id: 'pascal-fortbildung', doctor_id: 'doc-1', date: '2026-05-12', position: 'Fortbildung' },
+            { id: 'not-absence', doctor_id: 'doc-1', date: '2026-05-13', position: 'Frühdienst' },
+          ], []];
+        }
+        if (sql.startsWith('DELETE FROM ShiftEntry')) {
+          // Only the three absence-position rows should be deleted, by id.
+          expect(params.sort()).toEqual(['lower-urlaub', 'pascal-fortbildung', 'strip-umlaute']);
+          return [{ affectedRows: 3 }, []];
+        }
+        throw new Error(`Unexpected tenant SQL: ${sql}`);
+      },
+    };
+    const masterDb = {
+      async execute(sql, params = []) {
+        if (sql.includes('CREATE TABLE IF NOT EXISTS CentralAbsenceEntry')) {
+          return [[], []];
+        }
+        if (sql.startsWith('SELECT id FROM CentralAbsenceEntry WHERE employee_id = ? AND date = ?')) {
+          return [[], []];
+        }
+        if (sql.startsWith('INSERT INTO CentralAbsenceEntry')) {
+          return [{ affectedRows: 1 }, []];
+        }
+        if (sql.startsWith('SELECT `id`, `employee_id`, `date`, `position`')) {
+          return [[{
+            id: params[0], employee_id: params[1], date: '2026-05-10', position: 'urlaub',
+            note: null, start_time: null, end_time: null, break_minutes: null,
+            timeslot_id: null, order: null,
+            created_date: '2026-05-10 09:00:00', updated_date: '2026-05-10 09:00:00',
+            created_by: null, source_tenant_id: 'tenant-1', source_tenant_doctor_id: 'doc-1',
+          }], []];
+        }
+        throw new Error(`Unexpected master SQL: ${sql}`);
+      },
+    };
+
+    const result = await migrateTenantDoctorAbsencesToCentral({
+      tenantDb,
+      masterDb,
+      tenantId: 'tenant-1',
+      doctorId: 'doc-1',
+    });
+
+    expect(result).toEqual({ imported: 3, removedLocal: 3, skippedInvalidDate: [] });
+  });
+
+  it('normalizes the dedup key in the read-merge so case variants collapse', async () => {
+    const tenantDb = {
+      async execute(sql) {
+        if (sql.startsWith('SELECT * FROM ShiftEntry')) {
+          return [[
+            { id: 'local-urlaub', doctor_id: 'doc-1', date: '2026-06-10', position: 'urlaub' },
+            { id: 'local-duty', doctor_id: 'doc-2', date: '2026-06-10', position: 'Dienst A' },
+          ], []];
+        }
+        if (sql.includes('SELECT id, central_employee_id FROM Doctor')) {
+          return [[{ id: 'doc-1', central_employee_id: 'emp-1' }], []];
+        }
+        throw new Error(`Unexpected tenant SQL: ${sql}`);
+      },
+    };
+    const masterDb = {
+      async execute(sql) {
+        if (sql.includes('CREATE TABLE IF NOT EXISTS CentralAbsenceEntry')) {
+          return [[], []];
+        }
+        if (sql.startsWith('SELECT `id`, `employee_id`, `date`, `position`')) {
+          // Central row is PascalCase; the local row is lowercase. The dedup
+          // must recognize them as the same absence.
+          return [[{
+            id: 'central-1', employee_id: 'emp-1', date: '2026-06-10', position: 'Urlaub',
+            note: null, start_time: null, end_time: null, break_minutes: null,
+            timeslot_id: null, order: null,
+            created_date: '2026-06-10 09:00:00', updated_date: '2026-06-10 09:00:00',
+            created_by: null, source_tenant_id: 'tenant-1', source_tenant_doctor_id: 'doc-1',
+          }], []];
+        }
+        throw new Error(`Unexpected master SQL: ${sql}`);
+      },
+    };
+
+    const rows = await listShiftEntriesWithCentralAbsences({ tenantDb, masterDb });
+
+    // local-urlaub must be hidden because the normalized key matches the
+    // central row. local-duty stays visible.
+    expect(rows).toEqual([
+      {
+        id: 'central-1',
+        employee_id: 'emp-1',
+        doctor_id: 'doc-1',
+        date: '2026-06-10',
+        position: 'Urlaub',
+        note: null, start_time: null, end_time: null, break_minutes: null,
+        timeslot_id: null, order: null,
+        created_date: '2026-06-10 09:00:00', updated_date: '2026-06-10 09:00:00',
+        created_by: null, source_tenant_id: 'tenant-1', source_tenant_doctor_id: 'doc-1',
+      },
+      { id: 'local-duty', doctor_id: 'doc-2', date: '2026-06-10', position: 'Dienst A' },
+    ]);
   });
 
   it('previews how many local absences would move to central storage', async () => {

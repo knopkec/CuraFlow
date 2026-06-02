@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 
+// Canonical PascalCase spellings used by the central absence storage.
 export const CENTRAL_ABSENCE_POSITIONS = new Set([
   'Urlaub',
   'Krank',
@@ -11,6 +12,33 @@ export const CENTRAL_ABSENCE_POSITIONS = new Set([
   'Elternzeit',
   'Mutterschutz',
 ]);
+
+// Lowercase, umlaut-stripped spellings the tenant UI also treats as
+// absences. Both spellings are persisted in the wild (PascalCase from
+// newer writes, lowercase from older data and the `normalizeShiftPosition`
+// helper in src/utils/shiftPositionUtils.js). Normalize at the boundary so
+// migration and read-merge handle both consistently.
+const CENTRAL_ABSENCE_POSITIONS_NORMALIZED = new Set([
+  'urlaub',
+  'krank',
+  'frei',
+  'dienstreise',
+  'nicht verfügbar',
+  'nicht verfuegbar',
+  'fortbildung',
+  'kongress',
+  'elternzeit',
+  'mutterschutz',
+]);
+
+const normalizeShiftPosition = (position) => {
+  if (position === null || position === undefined) return '';
+  return String(position)
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+};
 
 const CENTRAL_ABSENCE_COLUMNS = [
   'id',
@@ -167,7 +195,8 @@ async function loadLinkedDoctors(tenantDb, filters = {}) {
 }
 
 export function isCentralAbsencePosition(position) {
-  return CENTRAL_ABSENCE_POSITIONS.has(position);
+  if (CENTRAL_ABSENCE_POSITIONS.has(position)) return true;
+  return CENTRAL_ABSENCE_POSITIONS_NORMALIZED.has(normalizeShiftPosition(position));
 }
 
 export async function ensureCentralAbsenceTables(masterDb) {
@@ -285,8 +314,10 @@ export async function listShiftEntriesWithCentralAbsences({
   // Dedup: hide a local linked-doctor absence row only when the same
   // (employee, date, position) already exists centrally. Until then the local
   // copy stays visible so migration is non-destructive to the read view.
+  // Normalize the position on both sides so case/umlaut variants of the
+  // same absence (e.g. 'Urlaub' vs 'urlaub') collapse to one entry.
   const centralKeys = new Set(
-    centralRows.map((row) => `${row.employee_id}|${toDateString(row.date)}|${row.position}`)
+    centralRows.map((row) => `${row.employee_id}|${toDateString(row.date)}|${normalizeShiftPosition(row.position)}`)
   );
   const dedupedLocalRows = localRows.filter((row) => {
     if (!linkedDoctorIds.has(String(row.doctor_id)) || !isCentralAbsencePosition(row.position)) {
@@ -294,7 +325,7 @@ export async function listShiftEntriesWithCentralAbsences({
     }
     const employeeId = employeeByDoctorId.get(String(row.doctor_id));
     if (!employeeId) return true;
-    return !centralKeys.has(`${employeeId}|${toDateString(row.date)}|${row.position}`);
+    return !centralKeys.has(`${employeeId}|${toDateString(row.date)}|${normalizeShiftPosition(row.position)}`);
   });
 
   const combinedRows = [
@@ -418,6 +449,7 @@ export async function migrateTenantDoctorAbsencesToCentral({
 
   let imported = 0;
   const skippedInvalidDate = [];
+  const migratedIds = [];
   for (const row of absenceRows) {
     const date = toDateString(row.date);
     // CentralAbsenceEntry.date is NOT NULL. Skip rows that have a null/empty
@@ -443,6 +475,7 @@ export async function migrateTenantDoctorAbsencesToCentral({
       doctorId,
       preserveId: true,
     });
+    migratedIds.push(row.id);
     imported += 1;
   }
 
@@ -463,14 +496,17 @@ export async function migrateTenantDoctorAbsencesToCentral({
     };
   }
 
-  await tenantDb.execute(
-    `DELETE FROM ShiftEntry
-      WHERE doctor_id = ?
-        AND position IN (${Array.from(CENTRAL_ABSENCE_POSITIONS).map(() => '?').join(', ')})`,
-    [doctorId, ...Array.from(CENTRAL_ABSENCE_POSITIONS)]
-  );
+  // Delete by id list so we cover position-spelling variants (PascalCase,
+  // lowercase, umlaut-stripped) and only remove rows that were actually
+  // imported — never rows that are still skipped or unchanged.
+  if (migratedIds.length > 0) {
+    await tenantDb.execute(
+      `DELETE FROM ShiftEntry WHERE id IN (${migratedIds.map(() => '?').join(', ')})`,
+      migratedIds
+    );
+  }
 
-  return { imported, removedLocal: absenceRows.length, skippedInvalidDate: [] };
+  return { imported, removedLocal: imported, skippedInvalidDate: [] };
 }
 
 export async function previewTenantDoctorAbsenceMigration({
@@ -545,12 +581,22 @@ export async function seedTenantDoctorAbsencesFromCentral({
     [employeeId]
   );
 
-  await tenantDb.execute(
-    `DELETE FROM ShiftEntry
-      WHERE doctor_id = ?
-        AND position IN (${Array.from(CENTRAL_ABSENCE_POSITIONS).map(() => '?').join(', ')})`,
-    [doctorId, ...Array.from(CENTRAL_ABSENCE_POSITIONS)]
+  // Clear all central-absence rows for this doctor regardless of position
+  // spelling (PascalCase, lowercase, umlaut-stripped) so the seed-back
+  // rebuilds a clean tenant copy from the master storage.
+  const [absenceLocalRows] = await tenantDb.execute(
+    'SELECT id, position FROM ShiftEntry WHERE doctor_id = ?',
+    [doctorId]
   );
+  const absenceIdsToDelete = absenceLocalRows
+    .filter((row) => isCentralAbsencePosition(row.position))
+    .map((row) => row.id);
+  if (absenceIdsToDelete.length > 0) {
+    await tenantDb.execute(
+      `DELETE FROM ShiftEntry WHERE id IN (${absenceIdsToDelete.map(() => '?').join(', ')})`,
+      absenceIdsToDelete
+    );
+  }
 
   for (const row of centralRows) {
     const payload = {
