@@ -336,6 +336,34 @@ export async function ensureTenantBaseTables(tenantPool) {
   await ensureColumns(tenantPool, 'ShiftNotification', [
     ['acknowledged', 'TINYINT(1) DEFAULT 0'],
   ]);
+
+  // Patch WishRequest for tenants whose table predates the current schema.
+  // CREATE TABLE IF NOT EXISTS above is a no-op for an existing table, so
+  // tenants that onboarded earlier (e.g. before target_month existed) keep
+  // the old shape and the Statistics page crashes with
+  // "Unknown column 'target_month' in 'WHERE'" on a filter request. Mirror
+  // the full column list from the CREATE TABLE statement above so the table
+  // converges regardless of when it was first created. addColumnIfMissing
+  // inside ensureColumns is a no-op when the column is already present, so
+  // this is safe to call on every tenant access.
+  await ensureColumns(tenantPool, 'WishRequest', [
+    ['target_month', 'VARCHAR(7) DEFAULT NULL'],
+    ['date', 'DATE DEFAULT NULL'],
+    ['start_date', 'DATE DEFAULT NULL'],
+    ['end_date', 'DATE DEFAULT NULL'],
+    ['position', 'VARCHAR(255) DEFAULT NULL'],
+    ['type', "VARCHAR(50) DEFAULT 'service'"],
+    ['status', "VARCHAR(32) DEFAULT 'pending'"],
+    ['priority', "VARCHAR(32) DEFAULT 'medium'"],
+    ['reason', 'TEXT DEFAULT NULL'],
+    ['admin_comment', 'TEXT DEFAULT NULL'],
+    ['comment', 'TEXT DEFAULT NULL'],
+    ['user_viewed', 'TINYINT(1) DEFAULT 0'],
+    ['range_start', 'DATE DEFAULT NULL'],
+    ['range_end', 'DATE DEFAULT NULL'],
+    ['approved_by', 'VARCHAR(255) DEFAULT NULL'],
+    ['approved_date', 'DATETIME DEFAULT NULL'],
+  ]);
 }
 
 export async function upsertRows(pool, tableName, columns, rows) {
