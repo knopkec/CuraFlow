@@ -238,7 +238,15 @@ describe('central absences', () => {
       doctorId: 'doc-1',
     });
 
-    expect(result).toEqual({ imported: 1, removedLocal: 1, skippedInvalidDate: [] });
+    expect(result).toEqual({
+      imported: 1,
+      removedLocal: 1,
+      skippedInvalidDate: [],
+      localAbsences: 2,
+      existingCentral: 1,
+      linkStatus: 'ok',
+      linkRepaired: false,
+    });
     expect(masterDb.calls.filter(({ sql }) => sql.startsWith('INSERT INTO CentralAbsenceEntry'))).toHaveLength(1);
   });
 
@@ -304,6 +312,9 @@ describe('central absences', () => {
         { id: 'absence-empty', position: 'Krank' },
       ],
       localAbsences: 3,
+      existingCentral: 0,
+      linkStatus: 'ok',
+      linkRepaired: false,
     });
     expect(inserts.map((params) => params[0])).toEqual(['absence-good']);
   });
@@ -361,7 +372,15 @@ describe('central absences', () => {
       doctorId: 'doc-1',
     });
 
-    expect(result).toEqual({ imported: 3, removedLocal: 3, skippedInvalidDate: [] });
+    expect(result).toEqual({
+      imported: 3,
+      removedLocal: 3,
+      skippedInvalidDate: [],
+      localAbsences: 3,
+      existingCentral: 0,
+      linkStatus: 'ok',
+      linkRepaired: false,
+    });
   });
 
   it('normalizes the dedup key in the read-merge so case variants collapse', async () => {
@@ -419,6 +438,155 @@ describe('central absences', () => {
     ]);
   });
 
+  it('repairs a missing tenant link from the master assignment and migrates', async () => {
+    const calls = [];
+    const tenantDb = {
+      calls,
+      async execute(sql, params = []) {
+        calls.push({ sql, params });
+        if (sql.startsWith('SELECT central_employee_id FROM Doctor')) {
+          // Master says this doctor is linked, but the tenant Doctor row has
+          // no central_employee_id yet (master/tenant link drift).
+          return [[{ central_employee_id: null }], []];
+        }
+        if (sql.startsWith('UPDATE Doctor SET central_employee_id = ?')) {
+          return [{ affectedRows: 1 }, []];
+        }
+        if (sql.startsWith('SELECT * FROM ShiftEntry WHERE doctor_id = ?')) {
+          return [[
+            { id: 'absence-x', doctor_id: 'doc-9', date: '2026-07-01', position: 'Urlaub', created_by: 'user@example.com' },
+          ], []];
+        }
+        if (sql.startsWith('DELETE FROM ShiftEntry')) {
+          expect(params).toEqual(['absence-x']);
+          return [{ affectedRows: 1 }, []];
+        }
+        throw new Error(`Unexpected tenant SQL: ${sql}`);
+      },
+    };
+    const masterDb = {
+      async execute(sql, params = []) {
+        if (sql.includes('CREATE TABLE IF NOT EXISTS CentralAbsenceEntry')) {
+          return [[], []];
+        }
+        if (sql.startsWith('SELECT id FROM CentralAbsenceEntry WHERE employee_id = ? AND date = ?')) {
+          return [[], []];
+        }
+        if (sql.startsWith('INSERT INTO CentralAbsenceEntry')) {
+          expect(params[1]).toBe('emp-9');
+          return [{ affectedRows: 1 }, []];
+        }
+        if (sql.startsWith('SELECT `id`, `employee_id`, `date`, `position`')) {
+          return [[{
+            id: params[0], employee_id: params[1], date: '2026-07-01', position: 'Urlaub',
+            note: null, start_time: null, end_time: null, break_minutes: null,
+            timeslot_id: null, order: null,
+            created_date: '2026-07-01 09:00:00', updated_date: '2026-07-01 09:00:00',
+            created_by: null, source_tenant_id: 'tenant-1', source_tenant_doctor_id: 'doc-9',
+          }], []];
+        }
+        throw new Error(`Unexpected master SQL: ${sql}`);
+      },
+    };
+
+    const result = await migrateTenantDoctorAbsencesToCentral({
+      tenantDb,
+      masterDb,
+      tenantId: 'tenant-1',
+      doctorId: 'doc-9',
+      employeeId: 'emp-9',
+    });
+
+    expect(result).toEqual({
+      imported: 1,
+      removedLocal: 1,
+      skippedInvalidDate: [],
+      localAbsences: 1,
+      existingCentral: 0,
+      linkStatus: 'repaired',
+      linkRepaired: true,
+    });
+    // The tenant link must be repaired before deleting any local rows.
+    const repair = calls.find(({ sql }) => sql.startsWith('UPDATE Doctor SET central_employee_id = ?'));
+    expect(repair.params).toEqual(['emp-9', 'doc-9']);
+  });
+
+  it('reports tenant_doctor_missing when no matching Doctor row exists', async () => {
+    const tenantDb = {
+      async execute(sql) {
+        if (sql.startsWith('SELECT central_employee_id FROM Doctor')) {
+          return [[], []];
+        }
+        throw new Error(`Unexpected tenant SQL: ${sql}`);
+      },
+    };
+    const masterDb = {
+      async execute(sql) {
+        throw new Error(`Master DB must not be touched: ${sql}`);
+      },
+    };
+
+    const result = await migrateTenantDoctorAbsencesToCentral({
+      tenantDb,
+      masterDb,
+      tenantId: 'tenant-1',
+      doctorId: 'ghost',
+      employeeId: 'emp-9',
+    });
+
+    expect(result).toEqual({
+      imported: 0,
+      removedLocal: 0,
+      localAbsences: 0,
+      existingCentral: 0,
+      skippedInvalidDate: [],
+      linkStatus: 'tenant_doctor_missing',
+    });
+  });
+
+  it('preview reports repair_needed when the tenant link is missing', async () => {
+    const tenantDb = {
+      async execute(sql) {
+        if (sql.startsWith('SELECT central_employee_id FROM Doctor')) {
+          return [[{ central_employee_id: null }], []];
+        }
+        if (sql.startsWith('SELECT * FROM ShiftEntry WHERE doctor_id = ?')) {
+          return [[
+            { id: 'absence-x', doctor_id: 'doc-9', date: '2026-07-01', position: 'Urlaub' },
+          ], []];
+        }
+        throw new Error(`Unexpected tenant SQL: ${sql}`);
+      },
+    };
+    const masterDb = {
+      async execute(sql) {
+        if (sql.includes('CREATE TABLE IF NOT EXISTS CentralAbsenceEntry')) {
+          return [[], []];
+        }
+        if (sql.startsWith('SELECT id FROM CentralAbsenceEntry WHERE employee_id = ? AND date = ?')) {
+          return [[], []];
+        }
+        throw new Error(`Unexpected master SQL: ${sql}`);
+      },
+    };
+
+    const result = await previewTenantDoctorAbsenceMigration({
+      tenantDb,
+      masterDb,
+      doctorId: 'doc-9',
+      employeeId: 'emp-9',
+    });
+
+    expect(result).toEqual({
+      imported: 1,
+      removedLocal: 1,
+      localAbsences: 1,
+      existingCentral: 0,
+      skippedInvalidDate: [],
+      linkStatus: 'repair_needed',
+    });
+  });
+
   it('previews how many local absences would move to central storage', async () => {
     const tenantDb = createMigrationTenantDb();
     const masterDb = createMigrationMasterDb();
@@ -435,6 +603,7 @@ describe('central absences', () => {
       localAbsences: 2,
       existingCentral: 1,
       skippedInvalidDate: [],
+      linkStatus: 'ok',
     });
     expect(masterDb.calls.filter(({ sql }) => sql.startsWith('INSERT INTO CentralAbsenceEntry'))).toHaveLength(0);
   });

@@ -429,14 +429,55 @@ export async function migrateTenantDoctorAbsencesToCentral({
   masterDb,
   tenantId,
   doctorId,
+  employeeId: masterEmployeeId = null,
 }) {
   const [doctorRows] = await tenantDb.execute(
     'SELECT central_employee_id FROM Doctor WHERE id = ? LIMIT 1',
     [doctorId]
   );
-  const employeeId = doctorRows[0]?.central_employee_id ? String(doctorRows[0].central_employee_id) : null;
+  if (doctorRows.length === 0) {
+    // The tenant_doctor_id stored in the master assignment does not match any
+    // Doctor row in this tenant. We cannot migrate; surface the mismatch
+    // instead of silently reporting an empty success.
+    return {
+      imported: 0,
+      removedLocal: 0,
+      localAbsences: 0,
+      existingCentral: 0,
+      skippedInvalidDate: [],
+      linkStatus: 'tenant_doctor_missing',
+    };
+  }
+
+  const tenantEmployeeId = doctorRows[0].central_employee_id
+    ? String(doctorRows[0].central_employee_id)
+    : null;
+  // The master EmployeeTenantAssignment is the authoritative link. When the
+  // tenant Doctor row has no central_employee_id yet (master and tenant link
+  // state drifted apart), fall back to the employee_id the assignment carries.
+  const employeeId = tenantEmployeeId || (masterEmployeeId ? String(masterEmployeeId) : null);
   if (!employeeId) {
-    return { imported: 0, removedLocal: 0 };
+    return {
+      imported: 0,
+      removedLocal: 0,
+      localAbsences: 0,
+      existingCentral: 0,
+      skippedInvalidDate: [],
+      linkStatus: 'unlinked',
+    };
+  }
+
+  // Repair the missing tenant link before touching any rows. This is required
+  // so the read-merge recognises the doctor as linked and shows the migrated
+  // absences again — without it, moving them to central storage would make
+  // them vanish from the tenant calendar.
+  let linkRepaired = false;
+  if (!tenantEmployeeId) {
+    await tenantDb.execute(
+      'UPDATE Doctor SET central_employee_id = ? WHERE id = ?',
+      [employeeId, doctorId]
+    );
+    linkRepaired = true;
   }
 
   await ensureCentralAbsenceTables(masterDb);
@@ -448,6 +489,7 @@ export async function migrateTenantDoctorAbsencesToCentral({
   const absenceRows = tenantRows.filter((row) => isCentralAbsencePosition(row.position));
 
   let imported = 0;
+  let existingCentral = 0;
   const skippedInvalidDate = [];
   const migratedIds = [];
   for (const row of absenceRows) {
@@ -464,6 +506,7 @@ export async function migrateTenantDoctorAbsencesToCentral({
       [employeeId, date]
     );
     if (existingRows.length > 0) {
+      existingCentral += 1;
       continue;
     }
 
@@ -493,6 +536,9 @@ export async function migrateTenantDoctorAbsencesToCentral({
       removedLocal: 0,
       skippedInvalidDate,
       localAbsences: absenceRows.length,
+      existingCentral,
+      linkStatus: linkRepaired ? 'repaired' : 'ok',
+      linkRepaired,
     };
   }
 
@@ -506,22 +552,53 @@ export async function migrateTenantDoctorAbsencesToCentral({
     );
   }
 
-  return { imported, removedLocal: imported, skippedInvalidDate: [] };
+  return {
+    imported,
+    removedLocal: imported,
+    skippedInvalidDate: [],
+    localAbsences: absenceRows.length,
+    existingCentral,
+    linkStatus: linkRepaired ? 'repaired' : 'ok',
+    linkRepaired,
+  };
 }
 
 export async function previewTenantDoctorAbsenceMigration({
   tenantDb,
   masterDb,
   doctorId,
+  employeeId: masterEmployeeId = null,
 }) {
   const [doctorRows] = await tenantDb.execute(
     'SELECT central_employee_id FROM Doctor WHERE id = ? LIMIT 1',
     [doctorId]
   );
-  const employeeId = doctorRows[0]?.central_employee_id ? String(doctorRows[0].central_employee_id) : null;
-  if (!employeeId) {
-    return { imported: 0, removedLocal: 0, localAbsences: 0, existingCentral: 0 };
+  if (doctorRows.length === 0) {
+    return {
+      imported: 0,
+      removedLocal: 0,
+      localAbsences: 0,
+      existingCentral: 0,
+      linkStatus: 'tenant_doctor_missing',
+    };
   }
+
+  const tenantEmployeeId = doctorRows[0].central_employee_id
+    ? String(doctorRows[0].central_employee_id)
+    : null;
+  // Mirror the real migration: the master assignment is authoritative, so fall
+  // back to it when the tenant Doctor row has no central_employee_id yet.
+  const employeeId = tenantEmployeeId || (masterEmployeeId ? String(masterEmployeeId) : null);
+  if (!employeeId) {
+    return {
+      imported: 0,
+      removedLocal: 0,
+      localAbsences: 0,
+      existingCentral: 0,
+      linkStatus: 'unlinked',
+    };
+  }
+  const linkRepairNeeded = !tenantEmployeeId;
 
   await ensureCentralAbsenceTables(masterDb);
 
@@ -531,7 +608,13 @@ export async function previewTenantDoctorAbsenceMigration({
   );
   const absenceRows = tenantRows.filter((row) => isCentralAbsencePosition(row.position));
   if (absenceRows.length === 0) {
-    return { imported: 0, removedLocal: 0, localAbsences: 0, existingCentral: 0 };
+    return {
+      imported: 0,
+      removedLocal: 0,
+      localAbsences: 0,
+      existingCentral: 0,
+      linkStatus: linkRepairNeeded ? 'repair_needed' : 'ok',
+    };
   }
 
   let imported = 0;
@@ -560,6 +643,7 @@ export async function previewTenantDoctorAbsenceMigration({
     localAbsences: absenceRows.length,
     existingCentral,
     skippedInvalidDate,
+    linkStatus: linkRepairNeeded ? 'repair_needed' : 'ok',
   };
 }
 
@@ -666,12 +750,14 @@ export async function migrateLinkedAssignmentsToCentral({
               tenantDb,
               masterDb,
               doctorId,
+              employeeId: assignment.employee_id || null,
             })
           : await migrateTenantDoctorAbsencesToCentral({
               tenantDb,
               masterDb,
               tenantId,
               doctorId,
+              employeeId: assignment.employee_id || null,
             })
       ));
 
@@ -704,6 +790,7 @@ export async function migrateLinkedAssignmentsToCentral({
         removedLocal: Number(migrationResult.removedLocal || 0),
         localAbsences: Number(migrationResult.localAbsences || migrationResult.removedLocal || 0),
         existingCentral: Number(migrationResult.existingCentral || 0),
+        linkStatus: migrationResult.linkStatus || 'ok',
         dry_run: dryRun,
       });
     } catch (error) {

@@ -16,6 +16,13 @@ import {
   Clock, UserCheck, UserX, Plus, Upload, ArrowUpRight, Trash2, Eye, EyeOff, RefreshCw, Download,
 } from 'lucide-react';
 
+const LINK_STATUS_LABELS = {
+  repair_needed: 'Verknüpfung wird repariert',
+  repaired: 'Verknüpfung repariert',
+  tenant_doctor_missing: 'Arzt im Mandant nicht gefunden',
+  unlinked: 'Nicht verknüpft',
+};
+
 function escapeCsvValue(value) {
   const normalized = String(value ?? '');
   if (!/[";,\n]/.test(normalized)) {
@@ -807,6 +814,9 @@ export default function MasterEmployeeList() {
                           </Badge>
                           {row.error ? <span className="ml-2 text-xs text-red-600">{row.error}</span> : null}
                           {row.reason ? <span className="ml-2 text-xs text-slate-500">{row.reason}</span> : null}
+                          {row.linkStatus && row.linkStatus !== 'ok' ? (
+                            <span className="ml-2 text-xs text-amber-600">{LINK_STATUS_LABELS[row.linkStatus] || row.linkStatus}</span>
+                          ) : null}
                         </TableCell>
                         <TableCell>{row.localAbsences ?? 0}</TableCell>
                         <TableCell>{row.imported ?? 0}</TableCell>
