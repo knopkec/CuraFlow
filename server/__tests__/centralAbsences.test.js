@@ -320,8 +320,8 @@ describe('central absences', () => {
       imported: 1,
       removedLocal: 1,
       skippedInvalidDate: [
-        { id: 'absence-bad', position: 'Urlaub' },
-        { id: 'absence-empty', position: 'Krank' },
+        { id: 'absence-bad', position: 'Urlaub', raw_date: null, reason: 'leer (null/undefined)' },
+        { id: 'absence-empty', position: 'Krank', raw_date: '', reason: 'leerer String' },
       ],
       localAbsences: 3,
       existingCentral: 0,
@@ -332,6 +332,75 @@ describe('central absences', () => {
     });
     expect(inserts.map((params) => params[0])).toEqual(['absence-good']);
     expect(deleted).toEqual(['absence-good']);
+  });
+
+  it('logs the exact reason for each skipped invalid-date row', async () => {
+    const warnLogs = [];
+    const originalWarn = console.warn;
+    console.warn = (...args) => warnLogs.push(args.join(' '));
+    try {
+      const tenantDb = {
+        async execute(sql, params = []) {
+          if (sql.startsWith('SELECT central_employee_id FROM Doctor')) {
+            return [[{ central_employee_id: 'emp-7' }], []];
+          }
+          if (sql.startsWith('SELECT * FROM ShiftEntry WHERE doctor_id = ?')) {
+            return [[
+              { id: 'row-null', doctor_id: 'doc-7', date: null, position: 'Urlaub' },
+              { id: 'row-garbage', doctor_id: 'doc-7', date: 'not-a-date', position: 'Krank' },
+              { id: 'row-bad-day', doctor_id: 'doc-7', date: '2026-13-40', position: 'Frei' },
+              { id: 'row-valid', doctor_id: 'doc-7', date: '2026-04-01', position: 'Frei' },
+            ], []];
+          }
+          if (sql.startsWith('DELETE FROM ShiftEntry')) {
+            return [{ affectedRows: params.length }, []];
+          }
+          throw new Error(`Unexpected tenant SQL: ${sql}`);
+        },
+      };
+      const masterDb = {
+        async execute(sql, params = []) {
+          if (sql.includes('CREATE TABLE IF NOT EXISTS CentralAbsenceEntry')) return [[], []];
+          if (sql.startsWith('SELECT id, position FROM CentralAbsenceEntry WHERE employee_id = ? AND date = ?')) return [[], []];
+          if (sql.startsWith('SELECT COUNT(*) AS total FROM CentralAbsenceEntry WHERE employee_id = ?')) return [[{ total: 1 }], []];
+          if (sql.startsWith('INSERT INTO CentralAbsenceEntry')) return [{ affectedRows: 1 }, []];
+          if (sql.startsWith('SELECT `id`, `employee_id`, `date`, `position`')) {
+            return [[{
+              id: params[0], employee_id: params[1], date: '2026-04-01', position: 'Frei',
+              note: null, start_time: null, end_time: null, break_minutes: null,
+              timeslot_id: null, order: null,
+              created_date: '2026-04-01 09:00:00', updated_date: '2026-04-01 09:00:00',
+              created_by: null, source_tenant_id: 'tenant-1', source_tenant_doctor_id: 'doc-7',
+            }], []];
+          }
+          throw new Error(`Unexpected master SQL: ${sql}`);
+        },
+      };
+
+      const result = await migrateTenantDoctorAbsencesToCentral({
+        tenantDb,
+        masterDb,
+        tenantId: 'tenant-1',
+        doctorId: 'doc-7',
+      });
+
+      expect(result.skippedInvalidDate.map((entry) => entry.id)).toEqual(['row-null', 'row-garbage', 'row-bad-day']);
+      expect(result.skippedInvalidDate.map((entry) => entry.reason)).toEqual([
+        'leer (null/undefined)',
+        expect.stringMatching(/unerwartetes Datumsformat/),
+        expect.stringMatching(/kein gültiges Kalenderdatum/),
+      ]);
+      expect(warnLogs.length).toBe(3);
+      expect(warnLogs[0]).toMatch(/row_id=row-null/);
+      expect(warnLogs[0]).toMatch(/raw_date=null/);
+      expect(warnLogs[0]).toMatch(/reason="leer \(null\/undefined\)"/);
+      expect(warnLogs[1]).toMatch(/row_id=row-garbage/);
+      expect(warnLogs[1]).toMatch(/raw_date="not-a-date"/);
+      expect(warnLogs[2]).toMatch(/row_id=row-bad-day/);
+      expect(warnLogs[2]).toMatch(/raw_date="2026-13-40"/);
+    } finally {
+      console.warn = originalWarn;
+    }
   });
 
   it('treats lowercase and umlaut-stripped positions as absences', async () => {

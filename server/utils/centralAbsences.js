@@ -72,6 +72,35 @@ const toDateString = (value) => {
   return String(value).slice(0, 10);
 };
 
+// CentralAbsenceEntry.date is NOT NULL DATE. Classify why a tenant ShiftEntry
+// row would fail to migrate so the admin can fix the source row. Returned to
+// the caller as `reason` and logged on the server so an offline re-run with
+// verbose logs gives an exact data map of what to fix.
+const classifyInvalidDate = (raw) => {
+  if (raw === null || raw === undefined) {
+    return { reason: 'leer (null/undefined)', normalized: null };
+  }
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (trimmed === '') return { reason: 'leerer String', normalized: null };
+    if (!/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+      return { reason: `unerwartetes Datumsformat: ${JSON.stringify(trimmed.slice(0, 40))}`, normalized: null };
+    }
+    const parsed = new Date(trimmed.slice(0, 10));
+    if (Number.isNaN(parsed.getTime())) {
+      return { reason: `kein gültiges Kalenderdatum: ${JSON.stringify(trimmed.slice(0, 10))}`, normalized: null };
+    }
+    return { reason: null, normalized: trimmed.slice(0, 10) };
+  }
+  if (raw instanceof Date) {
+    if (Number.isNaN(raw.getTime())) {
+      return { reason: 'Date-Objekt mit NaN', normalized: null };
+    }
+    return { reason: null, normalized: raw.toISOString().slice(0, 10) };
+  }
+  return { reason: `unerwarteter Typ: ${typeof raw} (Wert: ${JSON.stringify(String(raw).slice(0, 40))})`, normalized: null };
+};
+
 const fromSqlRow = (row) => {
   if (!row) return null;
   return {
@@ -495,14 +524,21 @@ export async function migrateTenantDoctorAbsencesToCentral({
   const migratedIds = [];
   const redundantIds = [];
   for (const row of absenceRows) {
-    const date = toDateString(row.date);
-    // CentralAbsenceEntry.date is NOT NULL. Skip rows that have a null/empty
-    // date so we never crash the whole migration on bad tenant data. These
-    // rows stay on the tenant side until the admin fixes the source.
-    if (!date) {
-      skippedInvalidDate.push({ id: row.id, position: row.position });
+    // CentralAbsenceEntry.date is NOT NULL DATE. Rows with missing/empty or
+    // non-parseable dates are kept local and reported with the exact reason
+    // so the admin can fix the source. We never crash the whole migration on
+    // a single bad row.
+    const classified = classifyInvalidDate(row.date);
+    if (!classified.normalized) {
+      skippedInvalidDate.push({
+        id: row.id,
+        position: row.position,
+        raw_date: row.date,
+        reason: classified.reason,
+      });
       continue;
     }
+    const date = classified.normalized;
     const [existingRows] = await masterDb.execute(
       'SELECT id, position FROM CentralAbsenceEntry WHERE employee_id = ? AND date = ? LIMIT 1',
       [employeeId, date]
@@ -549,10 +585,13 @@ export async function migrateTenantDoctorAbsencesToCentral({
   // is not data loss. Blocking the whole doctor here was the bug that made
   // "Migrieren" appear to do nothing while the dry-run kept reporting work.
   if (skippedInvalidDate.length > 0) {
-    console.warn(
-      `[Master absences] Skipped ${skippedInvalidDate.length} tenant absence row(s) for doctor ${doctorId} (employee ${employeeId}) due to invalid date:`,
-      skippedInvalidDate
-    );
+    // One line per offending row so an offline grep finds every row the admin
+    // has to fix. Format: doctor <id> | row <id> | reason | raw_date.
+    for (const entry of skippedInvalidDate) {
+      console.warn(
+        `[Master absences] Skipped tenant absence row: doctor=${doctorId} employee=${employeeId} row_id=${entry.id} position=${JSON.stringify(entry.position)} raw_date=${JSON.stringify(entry.raw_date)} reason="${entry.reason}"`
+      );
+    }
   }
 
   // Delete by id list so we cover position-spelling variants (PascalCase,
@@ -659,11 +698,17 @@ export async function previewTenantDoctorAbsenceMigration({
   const skippedInvalidDate = [];
   let conflicts = 0;
   for (const row of absenceRows) {
-    const date = toDateString(row.date);
-    if (!date) {
-      skippedInvalidDate.push({ id: row.id, position: row.position });
+    const classified = classifyInvalidDate(row.date);
+    if (!classified.normalized) {
+      skippedInvalidDate.push({
+        id: row.id,
+        position: row.position,
+        raw_date: row.date,
+        reason: classified.reason,
+      });
       continue;
     }
+    const date = classified.normalized;
     const [existingRows] = await masterDb.execute(
       'SELECT id, position FROM CentralAbsenceEntry WHERE employee_id = ? AND date = ? LIMIT 1',
       [employeeId, date]
@@ -834,9 +879,16 @@ export async function migrateLinkedAssignmentsToCentral({
       const importedCount = Number(migrationResult.imported || 0);
       const conflicts = Number(migrationResult.conflicts || 0);
       const localAbsencesCount = Number(migrationResult.localAbsences || 0);
-      const skippedInvalidDate = Array.isArray(migrationResult.skippedInvalidDate)
-        ? migrationResult.skippedInvalidDate.length
-        : Number(migrationResult.skippedInvalidDate || 0);
+      const skippedInvalidDateList = Array.isArray(migrationResult.skippedInvalidDate)
+        ? migrationResult.skippedInvalidDate
+        : [];
+      const skippedInvalidDate = skippedInvalidDateList.length;
+      // Compact summary "row_id: reason" so the report fits in a cell while
+      // the CSV / console still carry the full record with raw_date.
+      const skippedInvalidDateSummary = skippedInvalidDateList
+        .slice(0, 5)
+        .map((entry) => `${entry.id}: ${entry.reason}`)
+        .join('; ') + (skippedInvalidDateList.length > 5 ? ` (+${skippedInvalidDateList.length - 5} weitere)` : '');
       // "Not yet fully migrated" means the doctor still has local absence rows.
       // In a dry-run any remaining local row counts (a run would clean the
       // cleanable ones; conflicts and invalid-date rows stay and need manual
@@ -859,6 +911,7 @@ export async function migrateLinkedAssignmentsToCentral({
         localAbsences: localAbsencesCount,
         remainingLocal,
         skippedInvalidDate,
+        skippedInvalidDateSummary,
         existingCentral: Number(migrationResult.existingCentral || 0),
         centralTotal: Number(migrationResult.centralTotal || 0),
         conflicts,

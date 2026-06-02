@@ -54,6 +54,7 @@ function buildDryRunCsv(report, tenantScopeLabel) {
     'would_remove_local',
     'remaining_local',
     'skipped_invalid_date',
+    'skipped_invalid_date_detail',
     'conflicts',
     'needs_action',
     'reason',
@@ -81,6 +82,7 @@ function buildDryRunCsv(report, tenantScopeLabel) {
     row.removedLocal ?? 0,
     row.remainingLocal ?? 0,
     row.skippedInvalidDate ?? 0,
+    row.skippedInvalidDateSummary || '',
     row.conflicts ?? 0,
     row.needsAction ? 'yes' : 'no',
     row.reason || '',
@@ -866,7 +868,10 @@ export default function MasterEmployeeList() {
                             <span className="ml-2 text-xs text-amber-600">{row.conflicts} Konflikt(e) am selben Tag</span>
                           ) : null}
                           {Number(row.skippedInvalidDate || 0) > 0 ? (
-                            <span className="ml-2 text-xs text-amber-600">{row.skippedInvalidDate} Eintrag/Einträge mit ungültigem Datum</span>
+                            <span className="ml-2 text-xs text-amber-600">
+                              {row.skippedInvalidDate} Eintrag/Einträge mit ungültigem Datum
+                              {row.skippedInvalidDateSummary ? ` (${row.skippedInvalidDateSummary})` : ''}
+                            </span>
                           ) : null}
                         </TableCell>
                         <TableCell>{row.localAbsences ?? 0}</TableCell>
