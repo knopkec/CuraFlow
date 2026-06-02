@@ -655,15 +655,40 @@ router.post('/', async (req, res, next) => {
     // ===== LIST / FILTER =====
     if (effectiveAction === 'list' || effectiveAction === 'filter') {
       if (tableName === 'ShiftEntry' && req.db) {
-        const rows = await listShiftEntriesWithCentralAbsences({
-          tenantDb: dbPool,
-          masterDb: db,
-          filters: query || req.body.filters || {},
-          sort,
-          limit,
-          skip,
-        });
-        return res.json(rows);
+        try {
+          const rows = await listShiftEntriesWithCentralAbsences({
+            tenantDb: dbPool,
+            masterDb: db,
+            filters: query || req.body.filters || {},
+            sort,
+            limit,
+            skip,
+          });
+          return res.json(rows);
+        } catch (err) {
+          // Verbose server-side log: tells us exactly which request shape
+          // failed and which SQL step blew up (tenant ShiftEntry, linked
+          // doctors, ensureCentralAbsenceTables, central SELECT, sort/limit).
+          // The client only sees the generic "Datenbankfehler" toast, so the
+          // server log is the only place to see the real cause.
+          console.error('[dbProxy] ShiftEntry central-merge failed', {
+            action: effectiveAction,
+            table: tableName,
+            query: query || req.body.filters || {},
+            sort,
+            limit,
+            skip,
+            actor: actor?.id,
+            tenantToken: cacheKey,
+            message: err.message,
+            code: err.code,
+            errno: err.errno,
+            sqlState: err.sqlState,
+            sqlMessage: err.sqlMessage,
+            stack: err.stack,
+          });
+          throw err;
+        }
       }
 
       let sql = `SELECT * FROM \`${tableName}\``;
