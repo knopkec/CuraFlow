@@ -223,7 +223,7 @@ export default function DraggableShift({ shift, doctor, index, onRemove: _onRemo
                     >
                       {chipLabel}
                     </div>
-                    <div className="flex flex-col items-center justify-between min-w-0 basis-0 flex-1 leading-tight py-0.5">
+                    <div className="flex flex-col items-center justify-between min-w-0 basis-0 flex-1 h-full leading-tight py-0.5">
                       <span 
                         className="block min-w-0 w-full truncate px-1 text-center" 
                           style={{ fontSize: `${displayFontSize}px` }}
