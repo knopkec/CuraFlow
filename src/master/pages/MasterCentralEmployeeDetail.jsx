@@ -16,11 +16,11 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import {
-  ArrowLeft, Building2, User, FileText, Clock, CalendarDays,
+  ArrowLeft, Building2, User, FileText, Clock, CalendarDays, Sun,
   TrendingUp, TrendingDown, Minus, Save, Pencil, AlertCircle,
   Briefcase, Hash, Mail, Phone, MapPin,
   Loader2, UserCheck, UserX, Link2, RefreshCw, Trash2,
-  Download, Eye, Award,
+  Download, Eye, Award, CalendarCheck, CalendarX2,
 } from 'lucide-react';
 
 export default function MasterCentralEmployeeDetail() {
@@ -254,12 +254,15 @@ export default function MasterCentralEmployeeDetail() {
 
       {/* Tabs */}
       <Tabs defaultValue="stammdaten" className="w-full">
-        <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid">
+        <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-grid">
           <TabsTrigger value="stammdaten" className="flex items-center gap-2">
             <User className="w-4 h-4" /> Stammdaten
           </TabsTrigger>
           <TabsTrigger value="vertrag" className="flex items-center gap-2">
             <FileText className="w-4 h-4" /> Vertrag
+          </TabsTrigger>
+          <TabsTrigger value="urlaub" className="flex items-center gap-2">
+            <CalendarDays className="w-4 h-4" /> Urlaub
           </TabsTrigger>
           <TabsTrigger value="mandanten" className="flex items-center gap-2">
             <Building2 className="w-4 h-4" /> Mandanten
@@ -412,6 +415,99 @@ export default function MasterCentralEmployeeDetail() {
                     <p className="text-sm text-slate-600 whitespace-pre-wrap">{form.notes}</p>
                   </div>
                 </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Tab: Urlaub & Fehlzeiten */}
+        <TabsContent value="urlaub" className="mt-6 space-y-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <MiniCard
+              icon={Sun}
+              label="Jahresanspruch"
+              value={employee.vacation_days_total ?? '–'}
+              suffix="Tage"
+            />
+            <MiniCard
+              icon={CalendarCheck}
+              label="Genommen"
+              value={employee.vacation_days_taken ?? '–'}
+              suffix="Tage"
+              color="blue"
+            />
+            <MiniCard
+              icon={CalendarDays}
+              label="Geplant"
+              value={employee.vacation_days_planned ?? '–'}
+              suffix="Tage"
+              color="amber"
+            />
+            <MiniCard
+              icon={CalendarDays}
+              label="Resturlaub"
+              value={employee.remaining_vacation ?? '–'}
+              suffix="Tage"
+              color={
+                typeof employee.remaining_vacation === 'number' && employee.remaining_vacation < 5
+                  ? 'red'
+                  : 'emerald'
+              }
+            />
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <CalendarX2 className="w-5 h-5" />
+                Fehlzeiten-Verlauf
+              </CardTitle>
+              <CardDescription>
+                Alle Abwesenheiten dieses Mitarbeiters im aktuellen Jahr (aggregiert über alle verknüpften Mandanten)
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {(employee.absences?.length ?? 0) === 0 ? (
+                <div className="text-center py-10 text-slate-400">
+                  <CalendarX2 className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                  <p className="text-sm">Keine Fehlzeiten eingetragen</p>
+                </div>
+              ) : (
+                <ScrollArea className="h-[350px]">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Typ</TableHead>
+                        <TableHead>Datum</TableHead>
+                        <TableHead>Mandant</TableHead>
+                        <TableHead>Bemerkung</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(employee.absences ?? []).map((abs, i) => (
+                        <TableRow key={`${abs.tenant_id ?? 'x'}__${abs.from}__${abs.type}__${i}`}>
+                          <TableCell>
+                            <AbsenceTypeBadge type={abs.type} />
+                          </TableCell>
+                          <TableCell className="text-sm">{abs.from}</TableCell>
+                          <TableCell>
+                            {abs.tenant_name ? (
+                              <Badge variant="outline" className="text-xs">
+                                <Building2 className="w-3 h-3 mr-1" />
+                                {abs.tenant_name}
+                              </Badge>
+                            ) : (
+                              <span className="text-xs text-slate-400">–</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-sm text-slate-500 max-w-[260px] truncate">
+                            {abs.note || '–'}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
               )}
             </CardContent>
           </Card>
@@ -804,5 +900,45 @@ function FieldRow({ label, icon: Icon, value, editMode, type = 'text', onChange 
         </p>
       )}
     </div>
+  );
+}
+
+function MiniCard({ icon: Icon, label, value, suffix, color = 'slate' }) {
+  const colorMap = {
+    slate: 'text-slate-900',
+    blue: 'text-blue-700',
+    emerald: 'text-emerald-700',
+    red: 'text-red-700',
+    amber: 'text-amber-700',
+  };
+  return (
+    <div className="p-4 bg-white rounded-xl border">
+      <div className="flex items-center gap-2 mb-1">
+        <Icon className="w-4 h-4 text-slate-400" />
+        <span className="text-xs text-slate-500">{label}</span>
+      </div>
+      <p className={`text-xl font-bold ${colorMap[color]}`}>
+        {value} {suffix && <span className="text-sm font-normal text-slate-400">{suffix}</span>}
+      </p>
+    </div>
+  );
+}
+
+function AbsenceTypeBadge({ type }) {
+  const map = {
+    'Urlaub': 'bg-emerald-100 text-emerald-800',
+    'Krank': 'bg-red-100 text-red-800',
+    'Frei': 'bg-slate-100 text-slate-800',
+    'Dienstreise': 'bg-blue-100 text-blue-800',
+    'Nicht verfügbar': 'bg-amber-100 text-amber-800',
+    'Fortbildung': 'bg-purple-100 text-purple-800',
+    'Kongress': 'bg-violet-100 text-violet-800',
+    'Elternzeit': 'bg-pink-100 text-pink-800',
+    'Mutterschutz': 'bg-pink-100 text-pink-800',
+  };
+  return (
+    <span className={`px-2 py-0.5 rounded text-xs font-medium ${map[type] || 'bg-slate-100 text-slate-800'}`}>
+      {type}
+    </span>
   );
 }

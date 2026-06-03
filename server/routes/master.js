@@ -1464,6 +1464,14 @@ router.get('/employees/:id', async (req, res, next) => {
       [id]
     );
 
+    // Vacation + absences aggregated across all linked tenants
+    const empVacationDaysTotal = emp.vacation_days_annual != null ? Number(emp.vacation_days_annual) : 30;
+    const vacationSummary = await aggregateVacationAcrossTenants(
+      req.user.sub,
+      assignments,
+      empVacationDaysTotal
+    );
+
     res.json({
       ...emp,
       is_active: !!emp.is_active,
@@ -1478,12 +1486,111 @@ router.get('/employees/:id', async (req, res, next) => {
       })),
       timeAccounts: timeAccounts,
       time_accounts: timeAccounts,
+      ...vacationSummary,
     });
   } catch (error) {
     console.error('[Master employees] Detail error:', error);
     next(error);
   }
 });
+
+/**
+ * Aggregate vacation data for a central employee across every linked tenant.
+ *
+ * Iterates over the linked tenant assignments, queries each tenant's
+ * ShiftEntry table for absence positions of the current year, and returns
+ * the same shape that the single-tenant `/api/master/staff/:tenantId/:employeeId`
+ * endpoint exposes (vacation_days_total/taken/planned/remaining + absences).
+ *
+ * Deduplication: if a date appears for the same doctor in multiple linked
+ * tenants we only count it once (key = `${date}::${type}`) to avoid
+ * inflating the counters via duplicate tenant links.
+ */
+async function aggregateVacationAcrossTenants(adminUserId, assignments, vacationDaysTotal = 30) {
+  const absencePositions = [
+    'Urlaub', 'Krank', 'Frei', 'Dienstreise', 'Nicht verfügbar',
+    'Fortbildung', 'Kongress', 'Elternzeit', 'Mutterschutz',
+  ];
+  const placeholders = absencePositions.map(() => '?').join(',');
+
+  const currentYear = new Date().getFullYear();
+  let publicHolidayDates = new Set();
+  try {
+    publicHolidayDates = await getPublicHolidayDatesForYear(currentYear);
+  } catch (e) {
+    console.warn(`[Master employees] Holiday lookup failed: ${e.message}`);
+  }
+
+  const tokens = await getAllTenantTokens(adminUserId);
+  const tokenById = new Map(tokens.map((t) => [t.id, t]));
+  const today = format(new Date(), 'yyyy-MM-dd');
+
+  // Dedup by date+type so duplicate tenant links don't inflate counters.
+  const seenAbsenceKeys = new Set();
+  const absences = [];
+
+  for (const assignment of assignments) {
+    if (!assignment.tenant_id || !assignment.tenant_doctor_id) continue;
+    const token = tokenById.get(assignment.tenant_id);
+    if (!token) continue;
+
+    try {
+      const rows = await withTenantDb(token, async (pool) => {
+        const [absRows] = await pool.execute(
+          `SELECT date, position, note FROM ShiftEntry
+            WHERE doctor_id = ? AND YEAR(date) = ? AND position IN (${placeholders})
+            ORDER BY date`,
+          [assignment.tenant_doctor_id, currentYear, ...absencePositions]
+        );
+        return absRows;
+      });
+
+      for (const r of rows) {
+        const dateStr = typeof r.date === 'string'
+          ? r.date.substring(0, 10)
+          : format(r.date, 'yyyy-MM-dd');
+        const key = `${dateStr}::${r.position}`;
+        if (seenAbsenceKeys.has(key)) continue;
+        seenAbsenceKeys.add(key);
+        absences.push({
+          type: r.position,
+          from: dateStr,
+          to: dateStr,
+          days: 1,
+          note: r.note || null,
+          tenant_id: token.id,
+          tenant_name: token.name,
+        });
+      }
+    } catch (e) {
+      console.warn(`[Master employees] Absence query failed for tenant ${token.id}: ${e.message}`);
+    }
+  }
+
+  absences.sort((a, b) => a.from.localeCompare(b.from));
+
+  const isWorkday = (dateStr) => {
+    const d = new Date(`${dateStr}T12:00:00`);
+    const day = d.getDay();
+    if (day === 0 || day === 6) return false;
+    if (publicHolidayDates && publicHolidayDates.has(dateStr)) return false;
+    return true;
+  };
+
+  const vacationDates = absences
+    .filter((a) => a.type === 'Urlaub' && isWorkday(a.from))
+    .map((a) => a.from);
+  const vacationTaken = vacationDates.filter((d) => d <= today).length;
+  const vacationPlanned = vacationDates.filter((d) => d > today).length;
+
+  return {
+    absences,
+    vacation_days_total: vacationDaysTotal,
+    vacation_days_taken: vacationTaken,
+    vacation_days_planned: vacationPlanned,
+    remaining_vacation: vacationDaysTotal - vacationTaken - vacationPlanned,
+  };
+}
 
 /**
  * GET /api/master/employees/:id/certificates
