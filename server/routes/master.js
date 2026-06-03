@@ -1469,7 +1469,8 @@ router.get('/employees/:id', async (req, res, next) => {
     const vacationSummary = await aggregateVacationAcrossTenants(
       req.user.sub,
       assignments,
-      empVacationDaysTotal
+      empVacationDaysTotal,
+      id
     );
 
     res.json({
@@ -1506,7 +1507,7 @@ router.get('/employees/:id', async (req, res, next) => {
  * tenants we only count it once (key = `${date}::${type}`) to avoid
  * inflating the counters via duplicate tenant links.
  */
-async function aggregateVacationAcrossTenants(adminUserId, assignments, vacationDaysTotal = 30) {
+async function aggregateVacationAcrossTenants(adminUserId, assignments, vacationDaysTotal = 30, employeeId = null) {
   const absencePositions = [
     'Urlaub', 'Krank', 'Frei', 'Dienstreise', 'Nicht verfügbar',
     'Fortbildung', 'Kongress', 'Elternzeit', 'Mutterschutz',
@@ -1529,6 +1530,41 @@ async function aggregateVacationAcrossTenants(adminUserId, assignments, vacation
   const seenAbsenceKeys = new Set();
   const absences = [];
 
+  // --- Source 1: CentralAbsenceEntry (master DB) for migrated employees ---
+  // After migration the local ShiftEntry rows are removed; the canonical
+  // data lives here. Read this first so the dedup set prevents double-
+  // counting if somehow a row also still exists in a tenant ShiftEntry.
+  if (employeeId) {
+    try {
+      const [centralRows] = await db.execute(
+        `SELECT date, position, note FROM CentralAbsenceEntry
+          WHERE employee_id = ? AND YEAR(date) = ? AND position IN (${placeholders})
+          ORDER BY date`,
+        [employeeId, currentYear, ...absencePositions]
+      );
+      for (const r of centralRows) {
+        const dateStr = typeof r.date === 'string'
+          ? r.date.substring(0, 10)
+          : format(r.date, 'yyyy-MM-dd');
+        const key = `${dateStr}::${r.position}`;
+        if (seenAbsenceKeys.has(key)) continue;
+        seenAbsenceKeys.add(key);
+        absences.push({
+          type: r.position,
+          from: dateStr,
+          to: dateStr,
+          days: 1,
+          note: r.note || null,
+          tenant_id: null,
+          tenant_name: 'Zentral',
+        });
+      }
+    } catch (e) {
+      console.warn(`[Master employees] CentralAbsenceEntry query failed for ${employeeId}: ${e.message}`);
+    }
+  }
+
+  // --- Source 2: tenant ShiftEntry tables (non-migrated rows) ---
   for (const assignment of assignments) {
     if (!assignment.tenant_id || !assignment.tenant_doctor_id) continue;
     const token = tokenById.get(assignment.tenant_id);
