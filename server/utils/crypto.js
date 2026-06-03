@@ -130,3 +130,28 @@ export const parseDbToken = (token) => {
     return null;
   }
 };
+
+/**
+ * Derive the per-tenant storage key from a parsed DB token (or any object with
+ * `host` and `database` fields). Used to partition master-DB tables such as
+ * QualificationCertificate. The format is `sha256(host:database)` in hex.
+ *
+ * Returns null if the input is missing required fields.
+ */
+export const computeTenantKeyFromConfig = (config) => {
+  if (!config || !config.host || !config.database) return null;
+  return crypto
+    .createHash('sha256')
+    .update(`${config.host}:${config.database}`)
+    .digest('hex');
+};
+
+/**
+ * Convenience: parse a DB token and compute its tenant key in one call.
+ * Returns null on parse error or missing config.
+ */
+export const computeTenantKeyFromToken = (token) => {
+  const config = parseDbToken(token);
+  if (!config) return null;
+  return computeTenantKeyFromConfig(config);
+};

@@ -1163,11 +1163,12 @@ router.put('/db-tokens/:id', async (req, res, next) => {
     let encryptedToken = existing[0].token;
     let host = existing[0].host;
     let dbName = existing[0].db_name;
+    let newConfig = null;
     
     if (credentials && credentials.host && credentials.user && credentials.database) {
-      const { encryptToken } = await import('../utils/crypto.js');
+      const { encryptToken, computeTenantKeyFromConfig } = await import('../utils/crypto.js');
       
-      const config = {
+      newConfig = {
         host: credentials.host.trim(),
         user: credentials.user.trim(),
         password: credentials.password || '',
@@ -1176,10 +1177,10 @@ router.put('/db-tokens/:id', async (req, res, next) => {
       };
       
       if (credentials.ssl) {
-        config.ssl = { rejectUnauthorized: false };
+        newConfig.ssl = { rejectUnauthorized: false };
       }
       
-      encryptedToken = encryptToken(JSON.stringify(config));
+      encryptedToken = encryptToken(JSON.stringify(newConfig));
       host = credentials.host.trim();
       dbName = credentials.database.trim();
     }
@@ -1189,6 +1190,41 @@ router.put('/db-tokens/:id', async (req, res, next) => {
       SET name = ?, token = ?, host = ?, db_name = ?, description = ?, updated_date = NOW()
       WHERE id = ?
     `, [name?.trim() || existing[0].name, encryptedToken, host, dbName, description ?? existing[0].description, id]);
+
+    // Cascade-Update for tables that store the derived tenant_key.
+    // When host or database change, sha256(host:database) changes too, so any
+    // persisted tenant_key must be remapped or the rows become orphaned.
+    // Currently QualificationCertificate is the only such table.
+    if (newConfig) {
+      try {
+        const { computeTenantKeyFromConfig } = await import('../utils/crypto.js');
+        const { parseDbToken } = await import('../utils/crypto.js');
+        const oldKey = computeTenantKeyFromConfig(parseDbToken(existing[0].token));
+        const newKey = computeTenantKeyFromConfig(newConfig);
+        if (oldKey && newKey && oldKey !== newKey) {
+          const [result] = await db.execute(
+            `UPDATE QualificationCertificate
+                SET tenant_key = ?
+              WHERE tenant_key = ?`,
+            [newKey, oldKey]
+          );
+          if (result.affectedRows > 0) {
+            console.log(
+              `[DB-Tokens] Remapped ${result.affectedRows} QualificationCertificate row(s) ` +
+              `from tenant_key ${oldKey.substring(0, 8)}… to ${newKey.substring(0, 8)}… ` +
+              `(token "${name || existing[0].name}" updated by ${req.user.email})`
+            );
+          }
+        }
+      } catch (cascadeError) {
+        // Do not fail the whole update if the cascade can't run; surface in the
+        // server log so the operator can run a manual remap.
+        console.error(
+          '[DB-Tokens] tenant_key cascade remap failed (manual remap may be required):',
+          cascadeError.message
+        );
+      }
+    }
 
     removeTenantPool(existing[0].token);
     if (encryptedToken !== existing[0].token) {
