@@ -772,6 +772,112 @@ router.get('/staff/:tenantId/:employeeId', async (req, res, next) => {
 });
 
 /**
+ * GET /api/master/certificates/:tenantId/:employeeId
+ * List qualification certificates stored in master DB for a single employee.
+ * Read-only metadata view (no binary file data) for the Master Frontend.
+ */
+router.get('/certificates/:tenantId/:employeeId', async (req, res, next) => {
+  try {
+    const { tenantId, employeeId } = req.params;
+    console.log(`[Master certificates] Request: tenantId=${tenantId}, employeeId=${employeeId}`);
+
+    const tokens = await getAllTenantTokens(req.user.sub);
+    const token = tokens.find(t => t.id === tenantId);
+    if (!token) {
+      return res.status(404).json({ error: 'Mandant nicht gefunden oder kein Zugriff' });
+    }
+
+    const config = parseDbToken(token.token);
+    if (!config?.host || !config?.database) {
+      return res.status(500).json({ error: 'Mandanten-DB-Konfiguration ungültig' });
+    }
+    const tenantKey = crypto
+      .createHash('sha256')
+      .update(`${config.host}:${config.database}`)
+      .digest('hex');
+
+    // Verify the employee exists in this tenant before exposing any certificate metadata
+    await withTenantDb(token, async (pool) => {
+      const [rows] = await pool.execute('SELECT id, name FROM Doctor WHERE id = ? LIMIT 1', [employeeId]);
+      if (rows.length === 0) {
+        const err = new Error('Mitarbeiter im Mandanten nicht gefunden');
+        err.status = 404;
+        throw err;
+      }
+    });
+
+    const [certRows] = await db.execute(
+      `SELECT id, qualification_id, evidence_role, file_name, mime_type, file_size,
+              granted_date, expiry_date, notes, uploaded_by, uploaded_at, updated_at,
+              analysis_status, analysis_is_certificate, analysis_scope_match,
+              analysis_scope_detected, analysis_confidence, analysis_reasoning,
+              analysis_detected_granted, analysis_detected_expiry, analyzed_at
+         FROM QualificationCertificate
+        WHERE tenant_key = ? AND doctor_id = ?
+        ORDER BY uploaded_at DESC`,
+      [tenantKey, employeeId]
+    );
+
+    res.json({
+      employeeId,
+      tenantId,
+      certificates: certRows,
+    });
+  } catch (error) {
+    if (error.status) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    console.error('[Master certificates] Route error:', error);
+    next(error);
+  }
+});
+
+/**
+ * GET /api/master/certificates/:tenantId/:employeeId/:certificateId/download
+ * Stream a single certificate file from master DB. Admin-only, tenant-scoped.
+ */
+router.get('/certificates/:tenantId/:employeeId/:certificateId/download', async (req, res, next) => {
+  try {
+    const { tenantId, employeeId, certificateId } = req.params;
+
+    const tokens = await getAllTenantTokens(req.user.sub);
+    const token = tokens.find(t => t.id === tenantId);
+    if (!token) {
+      return res.status(404).json({ error: 'Mandant nicht gefunden oder kein Zugriff' });
+    }
+
+    const config = parseDbToken(token.token);
+    if (!config?.host || !config?.database) {
+      return res.status(500).json({ error: 'Mandanten-DB-Konfiguration ungültig' });
+    }
+    const tenantKey = crypto
+      .createHash('sha256')
+      .update(`${config.host}:${config.database}`)
+      .digest('hex');
+
+    const [rows] = await db.execute(
+      `SELECT id, file_name, mime_type, file_data
+         FROM QualificationCertificate
+        WHERE id = ? AND tenant_key = ? AND doctor_id = ?
+        LIMIT 1`,
+      [certificateId, tenantKey, employeeId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Zertifikat nicht gefunden' });
+    }
+
+    const cert = rows[0];
+    res.setHeader('Content-Type', cert.mime_type);
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(cert.file_name)}"`);
+    return res.send(cert.file_data);
+  } catch (error) {
+    console.error('[Master certificate download] Route error:', error);
+    next(error);
+  }
+});
+
+/**
  * GET /api/master/absences?year=2026&month=02&tenantId=xxx
  * Absences across all tenants for a given month
  */
