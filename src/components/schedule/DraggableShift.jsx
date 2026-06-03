@@ -223,7 +223,7 @@ export default function DraggableShift({ shift, doctor, index, onRemove: _onRemo
                     >
                       {chipLabel}
                     </div>
-                    <div className="flex flex-col items-center justify-center min-w-0 basis-0 flex-1 leading-tight">
+                    <div className="flex flex-col items-center justify-between min-w-0 basis-0 flex-1 leading-tight py-0.5">
                       <span 
                         className="block min-w-0 w-full truncate px-1 text-center" 
                           style={{ fontSize: `${displayFontSize}px` }}
@@ -235,7 +235,7 @@ export default function DraggableShift({ shift, doctor, index, onRemove: _onRemo
                           <button
                             type="button"
                             className="block min-w-0 w-full px-1 text-center whitespace-nowrap text-slate-500 font-normal underline decoration-dotted underline-offset-2 hover:text-indigo-700"
-                            style={{ fontSize: `${Math.max(fontSize * 0.65, 8)}px`, lineHeight: '1.2', marginTop: '1px' }}
+                            style={{ fontSize: `${Math.max(fontSize * 0.65, 8)}px`, lineHeight: '1.2' }}
                             onMouseDown={handleTimeLabelMouseDown}
                             onClick={handleTimeLabelClick}
                           >
@@ -244,7 +244,7 @@ export default function DraggableShift({ shift, doctor, index, onRemove: _onRemo
                         ) : (
                           <span
                             className="block min-w-0 w-full px-1 text-center whitespace-nowrap text-slate-500 font-normal"
-                            style={{ fontSize: `${Math.max(fontSize * 0.65, 8)}px`, lineHeight: '1.2', marginTop: '1px' }}
+                            style={{ fontSize: `${Math.max(fontSize * 0.65, 8)}px`, lineHeight: '1.2' }}
                           >
                             {timeLabel}
                           </span>
