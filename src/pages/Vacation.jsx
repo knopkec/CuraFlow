@@ -15,6 +15,7 @@ import DoctorYearView from '@/components/vacation/DoctorYearView';
 import VacationOverview from '@/components/vacation/VacationOverview';
 import AppSettingsDialog from '@/components/settings/AppSettingsDialog';
 import ConflictDialog, { categorizeConflict } from '@/components/vacation/ConflictDialog';
+import { parseAnnualVacationDays } from '@/components/vacation/vacationBalance';
 
 import { useHolidays } from '@/components/useHolidays';
 import { DEFAULT_COLORS } from '@/components/settings/ColorSettingsDialog';
@@ -107,6 +108,26 @@ export default function VacationPage() {
     });
 
     return infoByDoctorId;
+  }, [doctorsForSelection, masterEmployees]);
+
+  // Annual vacation entitlement per doctor. Prefer the linked master
+  // Employee's `vacation_days_annual` so the overview reflects changes made
+  // in the master frontend (e.g. via PayScaleTariff apply-defaults) without
+  // waiting for the Doctor row to be resynced. Falls back to the tenant
+  // Doctor.vacation_days only when the doctor is not linked, mirroring the
+  // single-view logic in DoctorYearView.
+  const entitlementByDoctorId = useMemo(() => {
+    const employeesById = new Map(masterEmployees.map((employee) => [employee.id, employee]));
+    const map = {};
+
+    doctorsForSelection.forEach((doctor) => {
+      const employee = doctor.central_employee_id ? employeesById.get(doctor.central_employee_id) : null;
+      const centralValue = employee?.vacation_days_annual;
+      const raw = centralValue != null ? centralValue : doctor.vacation_days;
+      map[doctor.id] = parseAnnualVacationDays(raw);
+    });
+
+    return map;
   }, [doctorsForSelection, masterEmployees]);
 
   const selectedDoctorContractInfo = selectedDoctor ? contractInfoByDoctorId[selectedDoctor.id] : null;
@@ -759,6 +780,7 @@ export default function VacationPage() {
             doctors={doctors} 
             shifts={overviewShifts} 
           contractInfoByDoctorId={contractInfoByDoctorId}
+          entitlementByDoctorId={entitlementByDoctorId}
             isSchoolHoliday={isSchoolHoliday}
             isPublicHoliday={isPublicHoliday}
             visibleTypes={visibleTypes}

@@ -130,8 +130,11 @@ function formatYmd(date) {
  * Parses the annual vacation entitlement. Distinguishes "no value
  * provided" (null/undefined/empty string/non-numeric → fallback 30) from
  * "explicitly zero" (legitimate, e.g. for a Praktikant).
+ *
+ * Exported so the multi-doctor `VacationOverview` can show the entitlement
+ * next to the planned+taken count without re-implementing the fallback.
  */
-function parseAnnualVacationDays(value) {
+export function parseAnnualVacationDays(value) {
   if (value === null || value === undefined || value === '') return 30;
   const n = Number(value);
   if (!Number.isFinite(n)) return 30;

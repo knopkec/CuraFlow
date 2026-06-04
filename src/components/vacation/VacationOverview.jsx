@@ -5,6 +5,7 @@ import { AlertTriangle } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useTeamRoles } from '@/components/settings/TeamRoleSettings';
 import { getContractTooltipLabel, isDateWithinContract } from '@/components/training/trainingContractUtils';
+import { parseAnnualVacationDays } from './vacationBalance';
 
 // Memoized Cell Component
 const VacationOverviewCell = memo(({ 
@@ -134,7 +135,7 @@ const VacationOverviewCell = memo(({
     return false;
 });
 
-export default function VacationOverview({ year, doctors, shifts, contractInfoByDoctorId = {}, isSchoolHoliday, isPublicHoliday, visibleTypes = [], customColors = {}, onToggle, onRangeSelect, activeType, isReadOnly, monthsPerRow = 3, minPresentSpecialists = 2, minPresentAssistants = 4 }) {
+export default function VacationOverview({ year, doctors, shifts, contractInfoByDoctorId = {}, entitlementByDoctorId = {}, isSchoolHoliday, isPublicHoliday, visibleTypes = [], customColors = {}, onToggle, onRangeSelect, activeType, isReadOnly, monthsPerRow = 3, minPresentSpecialists = 2, minPresentAssistants = 4 }) {
     // Dynamische Facharzt-Rollen aus DB laden
     const { specialistRoles } = useTeamRoles();
     
@@ -292,7 +293,7 @@ export default function VacationOverview({ year, doctors, shifts, contractInfoBy
                                         <th className="sticky left-0 z-20 bg-slate-100 border-b border-r p-2 w-[190px] min-w-[190px] text-left">
                                             Mitarbeiter
                                         </th>
-                                        <th className="sticky left-[190px] z-20 bg-slate-100 border-b border-r p-2 w-[50px] min-w-[50px] text-center shadow-[1px_0_0_0_rgba(0,0,0,0.1)]" title="Verplante Urlaubstage (Netto)">
+                                        <th className="sticky left-[190px] z-20 bg-slate-100 border-b border-r p-2 w-[50px] min-w-[50px] text-center shadow-[1px_0_0_0_rgba(0,0,0,0.1)]" title="Jahresanspruch / verplante+genommene Urlaubstage (Netto)">
                                             Urlaub
                                         </th>
                                         {months.map(m => {
@@ -393,8 +394,9 @@ export default function VacationOverview({ year, doctors, shifts, contractInfoBy
                                             <td className="sticky left-0 z-10 bg-white border-b border-r p-1 px-2 text-slate-700">
                                                 <div className="truncate font-medium" title={getContractTooltipLabel(contractInfoByDoctorId[doc.id]) || undefined}>{doc.name}</div>
                                             </td>
-                                            <td className="sticky left-[190px] z-10 bg-white border-b border-r p-1 text-center text-xs font-bold text-slate-600 shadow-[1px_0_0_0_rgba(0,0,0,0.1)]">
-                                                {vacationCounts[doc.id]}
+                                            <td className="sticky left-[190px] z-10 bg-white border-b border-r p-1 text-center text-xs font-bold text-slate-600 shadow-[1px_0_0_0_rgba(0,0,0,0.1)]" title={`${vacationCounts[doc.id]} verplante+genommene Tage von ${entitlementByDoctorId[doc.id] ?? parseAnnualVacationDays(doc.vacation_days)} Tagen Jahresanspruch`}>
+                                                {entitlementByDoctorId[doc.id] ?? parseAnnualVacationDays(doc.vacation_days)}
+                                                <span className="text-slate-400 font-normal">/{vacationCounts[doc.id]}</span>
                                             </td>
                                             {months.map(m => {
                                                 const date = setMonth(setYear(new Date(), year), m);

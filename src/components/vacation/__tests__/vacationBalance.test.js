@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { addDays, isWeekend, format } from 'date-fns';
-import { computeVacationBalance } from '../vacationBalance';
+import { computeVacationBalance, parseAnnualVacationDays } from '../vacationBalance';
 
 /**
  * Build `count` consecutive weekday dates (Mon–Fri) starting from
@@ -229,5 +229,20 @@ describe('computeVacationBalance', () => {
       today: TODAY,
     });
     expect(result.taken).toBe(1);
+  });
+});
+
+describe('parseAnnualVacationDays', () => {
+  it('returns the numeric value for finite numbers', () => {
+    expect(parseAnnualVacationDays(30)).toBe(30);
+    expect(parseAnnualVacationDays(0)).toBe(0);
+    expect(parseAnnualVacationDays('26')).toBe(26);
+  });
+
+  it('falls back to 30 for null/undefined/empty string/non-numeric', () => {
+    expect(parseAnnualVacationDays(null)).toBe(30);
+    expect(parseAnnualVacationDays(undefined)).toBe(30);
+    expect(parseAnnualVacationDays('')).toBe(30);
+    expect(parseAnnualVacationDays('n/a')).toBe(30);
   });
 });
