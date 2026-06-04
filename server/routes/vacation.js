@@ -64,7 +64,7 @@ router.get('/central-absences', async (req, res, next) => {
       });
     }
 
-    const { employee_id, absences } = await fetchCentralAbsencesForDoctor({
+    const { employee_id, absences, vacation_days_annual } = await fetchCentralAbsencesForDoctor({
       db,
       tenantId,
       doctorId: String(doctorId),
@@ -76,6 +76,7 @@ router.get('/central-absences', async (req, res, next) => {
       doctorId: String(doctorId),
       employee_id,
       absences,
+      vacation_days_annual,
     });
   } catch (error) {
     console.error('[vacation] central-absences failed', {

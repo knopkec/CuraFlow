@@ -49,11 +49,27 @@ export async function fetchCentralAbsencesForDoctor({ db: masterDb, tenantId, do
   );
 
   if (assignmentRows.length === 0) {
-    return { employee_id: null, absences: [] };
+    return { employee_id: null, absences: [], vacation_days_annual: null };
   }
   const employeeId = String(assignmentRows[0].employee_id);
 
-  // 2) Ensure the central table exists, then read the rows.
+  // 2) Fetch the central employee's vacation entitlement.
+  let vacationDaysAnnual = null;
+  try {
+    const [empRows] = await masterDb.execute(
+      `SELECT vacation_days_annual FROM Employee WHERE id = ? LIMIT 1`,
+      [employeeId]
+    );
+    if (empRows.length > 0) {
+      vacationDaysAnnual = Number(empRows[0].vacation_days_annual);
+    }
+  } catch {
+    // Graceful: if the Employee table or column doesn't exist yet,
+    // we just don't provide the value; the frontend falls back.
+    vacationDaysAnnual = null;
+  }
+
+  // 3) Ensure the central table exists, then read the rows.
   await ensureCentralAbsenceTables(masterDb);
 
   const placeholders = VACATION_ABSENCE_POSITIONS.map(() => '?').join(',');
@@ -86,5 +102,5 @@ export async function fetchCentralAbsencesForDoctor({ db: masterDb, tenantId, do
       };
     });
 
-  return { employee_id: employeeId, absences };
+  return { employee_id: employeeId, absences, vacation_days_annual: vacationDaysAnnual };
 }

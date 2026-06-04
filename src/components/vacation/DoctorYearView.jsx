@@ -226,10 +226,18 @@ export default function DoctorYearView({
       (a) => !localDates.has(a.date) // dedup against local
     );
 
+    // For linked employees, prefer the central vacation_days_annual over the
+    // tenant-local Doctor.vacation_days so the display always reflects the
+    // master frontend (e.g. changed via PayScaleTariff apply-defaults).
+    const annualVacationDays =
+      centralAbsencePayload?.employee_id
+        ? (centralAbsencePayload.vacation_days_annual ?? doctor.vacation_days)
+        : doctor.vacation_days;
+
     return computeVacationBalance({
       shifts: [...localShifts, ...centralShifts],
       year,
-      annualVacationDays: doctor.vacation_days,
+      annualVacationDays,
       publicHolidayDates,
     });
   }, [doctor, shifts, centralAbsencePayload, year, publicHolidayDates]);
