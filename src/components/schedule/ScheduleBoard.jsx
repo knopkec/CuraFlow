@@ -1,11 +1,13 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { flushSync } from 'react-dom';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { format, addDays, subDays, startOfWeek, isSameDay, startOfMonth, endOfMonth, addMonths, eachDayOfInterval, isValid } from 'date-fns';
 import { de } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, ChevronDown, Wand2, Loader2, Trash2, Eye, EyeOff, Layout, Calendar, LayoutList, StickyNote, AlertTriangle, Download, Undo, ExternalLink, X, Lock, Unlock, Settings2, Globe2, Plus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Wand2, Loader2, Trash2, Eye, EyeOff, Layout, Calendar, LayoutList, StickyNote, AlertTriangle, Download, Undo, ExternalLink, X, Lock, Unlock, Settings2, Globe2, Plus, Filter, Check, ChevronsUpDown } from 'lucide-react';
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Badge } from "@/components/ui/badge";
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -43,7 +45,7 @@ import FreeTextCell from './FreeTextCell';
 import { isWishOnDate } from '@/utils/wishRange';
 import { useShiftValidation } from '@/components/validation/useShiftValidation';
 import { useOverrideValidation } from '@/components/validation/useOverrideValidation';
-import { useAllDoctorQualifications, useAllWorkplaceQualifications } from '@/hooks/useQualifications';
+import { useAllDoctorQualifications, useAllWorkplaceQualifications, useQualifications } from '@/hooks/useQualifications';
 import OverrideConfirmDialog from '@/components/validation/OverrideConfirmDialog';
 // trackDbChange removed - MySQL mode doesn't use auto-backup
 import { useHolidays } from '@/components/useHolidays';
@@ -862,6 +864,9 @@ export default function ScheduleBoard() {
                     return saved ? JSON.parse(saved) : false;
         } catch { return false; }
     });
+
+    const [selectedQualificationIds, setSelectedQualificationIds] = useState([]);
+    const [scheduleFilterOpen, setScheduleFilterOpen] = useState(false);
 
   // Sync with user profile when it loads/updates
   useEffect(() => {
@@ -1730,8 +1735,29 @@ export default function ScheduleBoard() {
         });
 
   // Qualifikationsdaten für visuelle Indikatoren
-    const { getQualificationIds: getDoctorQualIds } = useAllDoctorQualifications();
+    const { getQualificationIds: getDoctorQualIds, isLoading: allDoctorQualsLoading } = useAllDoctorQualifications();
     const { getRequiredQualificationIds: getWpRequiredQualIds, getOptionalQualificationIds: getWpOptionalQualIds, getExcludedQualificationIds: getWpExcludedQualIds, getDiscouragedQualificationIds: getWpDiscouragedQualIds } = useAllWorkplaceQualifications();
+    const { qualifications = [], qualificationMap, isLoading: qualificationsLoading } = useQualifications();
+
+    const activeQualifications = useMemo(
+        () => qualifications.filter((q) => q.is_active !== false),
+        [qualifications]
+    );
+    const isQualificationDataLoading = qualificationsLoading || allDoctorQualsLoading;
+
+    const toggleScheduleQualification = (qid) => {
+        setSelectedQualificationIds((current) => (
+            current.includes(qid)
+                ? current.filter((id) => id !== qid)
+                : [...current, qid]
+        ));
+    };
+
+    const matchesScheduleQualificationFilter = useCallback((doctor) => {
+        if (selectedQualificationIds.length === 0) return true;
+        const ids = getDoctorQualIds(doctor.id);
+        return selectedQualificationIds.some((qid) => ids.includes(qid));
+    }, [selectedQualificationIds, getDoctorQualIds]);
 
   // Override-Validierung mit Dialog
   const {
@@ -2493,13 +2519,18 @@ export default function ScheduleBoard() {
     }, [viewMode, rowLabelWidth, weekDays.length, isMonthView]);
 
   // Sidebar-Ärzte filtern: Ausgeschiedene, KO, MS, 0.0 FTE ausblenden
-  const sidebarDoctors = useMemo(() => {
+  const sidebarDoctorsAll = useMemo(() => {
     if (!weekDays.length || !doctors.length) return doctors;
         const checkDate = viewMode === 'month' ? currentDate : weekDays[0];
         return sortDoctorsForDisplay(
             doctors.filter(doc => isDoctorAvailable(doc, checkDate, staffingPlanEntries))
         );
         }, [currentDate, doctors, sortDoctorsAlphabetically, staffingPlanEntries, viewMode, weekDays]);
+
+    const sidebarDoctors = useMemo(() => {
+        if (selectedQualificationIds.length === 0) return sidebarDoctorsAll;
+        return sidebarDoctorsAll.filter(matchesScheduleQualificationFilter);
+    }, [sidebarDoctorsAll, matchesScheduleQualificationFilter, selectedQualificationIds]);
 
     const getDoctorWithEffectiveFte = (doctor, referenceDate) => {
         if (!doctor || !referenceDate) {
@@ -2701,12 +2732,16 @@ export default function ScheduleBoard() {
             const dateStr = format(day, 'yyyy-MM-dd');
             const assignedDocIds = availabilityBlockingDoctorIdsByDate.get(dateStr) || new Set();
             map.set(dateStr, sortDoctorsForDisplay(
-                doctors.filter((doctor) => !assignedDocIds.has(doctor.id) && doctor.role !== 'Nicht-Radiologe')
+                doctors.filter((doctor) =>
+                    !assignedDocIds.has(doctor.id) &&
+                    doctor.role !== 'Nicht-Radiologe' &&
+                    matchesScheduleQualificationFilter(doctor)
+                )
             ));
         });
 
         return map;
-    }, [availabilityBlockingDoctorIdsByDate, doctors, sortDoctorsAlphabetically, weekDays]);
+    }, [availabilityBlockingDoctorIdsByDate, doctors, matchesScheduleQualificationFilter, sortDoctorsAlphabetically, weekDays]);
 
     const lateRotationIndicatorByDoctorDay = useMemo(() => {
         const indicatorMap = new Map();
@@ -5047,10 +5082,100 @@ export default function ScheduleBoard() {
 
                   {/* Sidebar */}
                 {showSidebar && !isEmbeddedSchedule && (
-                <div className={`w-full lg:w-64 flex-shrink-0 bg-white p-4 rounded-lg shadow-sm border border-slate-200 lg:sticky lg:top-4 max-h-[calc(100vh-200px)] flex flex-col gap-4 z-50 ${draggingDoctorId ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+                <div className={`w-full lg:w-64 flex-shrink-0 bg-white p-4 rounded-lg shadow-sm border border-slate-200 lg:sticky lg:top-4 max-h-[calc(100vh-200px)] flex flex-col gap-3 z-50 ${draggingDoctorId ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+                <Popover open={scheduleFilterOpen} onOpenChange={setScheduleFilterOpen}>
+                    <PopoverTrigger asChild>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            data-testid="schedule-sidebar-qualification-filter"
+                            className="h-8 w-full justify-between gap-2 px-2 text-xs font-normal text-slate-600"
+                        >
+                            <span className="flex items-center gap-2 truncate">
+                                <Filter className="h-3.5 w-3.5 shrink-0" />
+                                <span className="truncate">
+                                    {isQualificationDataLoading
+                                        ? 'Qualifikationen laden...'
+                                        : selectedQualificationIds.length === 0
+                                            ? 'Qualifikationsfilter'
+                                            : `${selectedQualificationIds.length} Qualifikation${selectedQualificationIds.length === 1 ? '' : 'en'} aktiv`}
+                                </span>
+                            </span>
+                            <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+                        </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[320px] p-0" align="start" side="right">
+                        <Command>
+                            <CommandInput placeholder="Qualifikation suchen..." aria-label="Qualifikation suchen" />
+                            <CommandList>
+                                <CommandEmpty>Keine Qualifikation gefunden.</CommandEmpty>
+                                {activeQualifications.map((qualification) => {
+                                    const isSelected = selectedQualificationIds.includes(qualification.id);
+                                    return (
+                                        <CommandItem
+                                            key={qualification.id}
+                                            value={`${qualification.name} ${qualification.short_label || ''}`}
+                                            onSelect={() => toggleScheduleQualification(qualification.id)}
+                                        >
+                                            <div className={cn(
+                                                "flex h-4 w-4 items-center justify-center rounded-sm border",
+                                                isSelected ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 text-transparent'
+                                            )}>
+                                                <Check className="h-3 w-3" />
+                                            </div>
+                                            <Badge
+                                                style={{
+                                                    backgroundColor: qualification.color_bg || '#e0e7ff',
+                                                    color: qualification.color_text || '#3730a3'
+                                                }}
+                                                className="border-0 text-[10px]"
+                                            >
+                                                {qualification.short_label || qualification.name.substring(0, 3).toUpperCase()}
+                                            </Badge>
+                                            <span className="truncate">{qualification.name}</span>
+                                        </CommandItem>
+                                    );
+                                })}
+                            </CommandList>
+                        </Command>
+                        {selectedQualificationIds.length > 0 && (
+                            <div className="border-t p-2 space-y-2">
+                                <div className="flex flex-wrap gap-1">
+                                    {selectedQualificationIds.map((qid) => {
+                                        const qualification = qualificationMap[qid];
+                                        if (!qualification) return null;
+                                        return (
+                                            <button
+                                                key={qid}
+                                                type="button"
+                                                onClick={() => toggleScheduleQualification(qid)}
+                                                className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-700 transition-colors hover:bg-slate-100"
+                                            >
+                                                <span>{qualification.short_label || qualification.name}</span>
+                                                <X className="h-2.5 w-2.5" />
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 w-full text-xs text-slate-500"
+                                    onClick={() => setSelectedQualificationIds([])}
+                                >
+                                    Filter zurücksetzen
+                                </Button>
+                            </div>
+                        )}
+                    </PopoverContent>
+                </Popover>
                 <div>
                 <h3 className="font-semibold text-slate-700 mb-3 flex items-center">
-                    <span className="bg-indigo-100 text-indigo-700 w-6 h-6 rounded-full flex items-center justify-center text-xs mr-2">{sidebarDoctors.length}</span>
+                    <span className="bg-indigo-100 text-indigo-700 h-6 px-2 rounded-full flex items-center justify-center text-xs mr-2">
+                        {selectedQualificationIds.length > 0
+                            ? `${sidebarDoctors.length}/${sidebarDoctorsAll.length}`
+                            : sidebarDoctors.length}
+                    </span>
                     Verfügbares Personal
                 </h3>
                 <Droppable 
@@ -5118,6 +5243,11 @@ export default function ScheduleBoard() {
                         </div>
                     )}
                 </Droppable>
+                {sidebarDoctors.length === 0 && selectedQualificationIds.length > 0 && (
+                    <div className="mt-2 rounded-md border border-dashed border-slate-200 bg-slate-50 p-3 text-center text-[11px] text-slate-500">
+                        Keine Ärzte mit den gewählten Qualifikationen.
+                    </div>
+                )}
             </div>
             
             {/* Trash removed - use overlay instead */}
