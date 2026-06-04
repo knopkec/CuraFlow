@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '@/api/client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -120,15 +120,24 @@ function downloadCsvFile(content, fileName) {
 
 export default function MasterEmployeeList() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
-  const [selectedTenant, setSelectedTenant] = useState('all');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedTenant, setSelectedTenant] = useState(searchParams.get('tenant') || 'all');
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
   const [viewMode, setViewMode] = useState('central');
   const [sortField, setSortField] = useState('name');
   const [sortDir, setSortDir] = useState('asc');
   const [showInactive, setShowInactive] = useState(false); // 'central' | 'legacy'
   const [dryRunReport, setDryRunReport] = useState(null);
   const [showOnlyOpen, setShowOnlyOpen] = useState(false);
+
+  // URL-Suchparameter synchron halten (überlebt Navigation)
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (selectedTenant && selectedTenant !== 'all') params.set('tenant', selectedTenant);
+    if (searchQuery) params.set('q', searchQuery);
+    setSearchParams(params, { replace: true });
+  }, [selectedTenant, searchQuery, setSearchParams]);
 
   // Mandanten laden
   const { data: tenants = [] } = useQuery({
