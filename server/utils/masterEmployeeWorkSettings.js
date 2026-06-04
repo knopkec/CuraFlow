@@ -61,7 +61,7 @@ export async function syncEmployeeWorkSettingsToTenantDoctors({
              FROM INFORMATION_SCHEMA.COLUMNS
              WHERE TABLE_NAME = 'Doctor'
                AND TABLE_SCHEMA = DATABASE()
-               AND COLUMN_NAME IN ('target_weekly_hours', 'work_time_model_id')`
+               AND COLUMN_NAME IN ('target_weekly_hours', 'work_time_model_id', 'vacation_days')`
           );
 
           doctorColumns = new Set(columnRows.map((row) => row.COLUMN_NAME));
@@ -79,6 +79,11 @@ export async function syncEmployeeWorkSettingsToTenantDoctors({
         if (doctorColumns.has('work_time_model_id')) {
           updates.push('work_time_model_id = ?');
           params.push(employee.work_time_model_id || null);
+        }
+
+        if (doctorColumns.has('vacation_days') && employee.vacation_days_annual != null) {
+          updates.push('vacation_days = ?');
+          params.push(employee.vacation_days_annual);
         }
 
         if (updates.length === 0) {
