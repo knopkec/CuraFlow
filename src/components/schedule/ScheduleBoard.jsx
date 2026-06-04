@@ -4496,6 +4496,15 @@ export default function ScheduleBoard() {
                                   <div className="flex items-center gap-2">
                                       {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                                       {getSectionName(section.title)}
+                                      {isPinnedSection && selectedQualificationIds.length > 0 && (
+                                          <span
+                                              data-testid="schedule-anwesenheiten-filter-indicator"
+                                              className="inline-flex items-center gap-1 rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-amber-900"
+                                          >
+                                              <Filter className="h-3 w-3" />
+                                              Filter aktiv
+                                          </span>
+                                      )}
                                   </div>
                                   <span className="text-[10px] opacity-70 bg-white/20 px-2 py-0.5 rounded-full">{visibleRows.length}</span>
                               </div>
@@ -5395,6 +5404,15 @@ export default function ScheduleBoard() {
                         <div className="flex items-center gap-2">
                             {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                             {getSectionName(section.title)}
+                            {isPinnedSection && selectedQualificationIds.length > 0 && (
+                                <span
+                                    data-testid="schedule-anwesenheiten-filter-indicator"
+                                    className="inline-flex items-center gap-1 rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-amber-900"
+                                >
+                                    <Filter className="h-3 w-3" />
+                                    Filter aktiv
+                                </span>
+                            )}
                         </div>
                         <div className="flex items-center gap-2">
                             {activeSectionTabId === 'main' && section.title !== 'Archiv / Unbekannt' && section.title !== PINNED_SECTION_TITLE && (
