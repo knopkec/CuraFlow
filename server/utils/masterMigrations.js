@@ -269,6 +269,15 @@ export async function runMasterMigrations(dbPool) {
     return changed || SKIPPED;
   }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalte bereits vorhanden', skippedReason: 'Spalte bereits vorhanden' });
 
+  // contract_type was originally ENUM with old value set. Change to VARCHAR
+  // so the UI values ('unbefristet','befristet','praktikum', etc.) are accepted.
+  await run('change_contract_type_to_varchar', async () => {
+    const col = await getColumnInfo('Employee', 'contract_type');
+    if (!col) return SKIPPED;
+    if (col.COLUMN_TYPE && col.COLUMN_TYPE.startsWith('varchar')) return SKIPPED; // already done
+    await dbPool.execute(`ALTER TABLE Employee MODIFY COLUMN contract_type VARCHAR(50) DEFAULT NULL`);
+  }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalte bereits vorhanden', skippedReason: 'Bereits VARCHAR' });
+
   // ===== PHASE 4: Time Accounts (Master-DB) =====
 
   // ===== Qualification Certificates (central, multi-tenant) =====
