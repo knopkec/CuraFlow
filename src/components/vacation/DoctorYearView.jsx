@@ -187,7 +187,7 @@ export default function DoctorYearView({
       return result || { absences: [] };
     },
     enabled: Boolean(doctor?.id),
-    staleTime: 60 * 1000,
+    staleTime: 0,  // always refetch so the display is never stale after mutate
     retry: 0,
   });
 

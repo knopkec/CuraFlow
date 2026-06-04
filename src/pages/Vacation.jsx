@@ -335,10 +335,12 @@ export default function VacationPage() {
     },
     onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: ['shifts', selectedYear] });
+        queryClient.invalidateQueries({ queryKey: ['central-absences'] });
     },
     onError: (err) => {
         toast.error("Konflikt: " + (err.response?.data?.message || err.message));
         queryClient.invalidateQueries({ queryKey: ['shifts', selectedYear] });
+        queryClient.invalidateQueries({ queryKey: ['central-absences'] });
     }
   });
 
@@ -346,6 +348,7 @@ export default function VacationPage() {
     mutationFn: (id) => db.ShiftEntry.delete(id),
     onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: ['shifts', selectedYear] });
+        queryClient.invalidateQueries({ queryKey: ['central-absences'] });
     },
   });
 
@@ -364,6 +367,7 @@ export default function VacationPage() {
     mutationFn: (data) => db.ShiftEntry.bulkCreate(data),
     onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: ['shifts', selectedYear] });
+        queryClient.invalidateQueries({ queryKey: ['central-absences'] });
     },
   });
 
@@ -373,6 +377,7 @@ export default function VacationPage() {
     },
     onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: ['shifts', selectedYear] });
+        queryClient.invalidateQueries({ queryKey: ['central-absences'] });
     },
   });
 
