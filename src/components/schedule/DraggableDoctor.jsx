@@ -2,11 +2,17 @@ import { Draggable } from '@hello-pangea/dnd';
 import { User, Clock } from 'lucide-react';
 import { resolveDoctorTargetWeeklyHours } from '@/components/schedule/doctorWorkTime';
 
-export default function DraggableDoctor({ doctor, index, style, isDragDisabled, isBeingDragged, compactLabel, isCompactMode = false, workTimeModel, centralEmployee = null, plannedHours, showTimeAccount = false }) {
+export default function DraggableDoctor({ doctor, index, style, isDragDisabled, isBeingDragged, compactLabel, isCompactMode = false, workTimeModel, centralEmployee = null, plannedHours, showTimeAccount = false, hintRingClass = null, hintKind = null }) {
   const chipLabel = compactLabel || doctor.initials || doctor.name.substring(0, 3);
   const targetWeekly = resolveDoctorTargetWeeklyHours(doctor, workTimeModel, centralEmployee);
   const planned = plannedHours || 0;
   const pct = targetWeekly ? (planned / targetWeekly) * 100 : null;
+
+  const hintTitle = hintKind === 'preferred'
+    ? 'Sollte (bevorzugt)'
+    : hintKind === 'discouraged'
+      ? 'Sollte nicht (möglich, aber ungünstig)'
+      : null;
 
   return (
     <Draggable draggableId={`sidebar-doc-${doctor.id}`} index={index} isDragDisabled={isDragDisabled}>
@@ -27,9 +33,9 @@ export default function DraggableDoctor({ doctor, index, style, isDragDisabled, 
           height: isCompact ? '49px' : undefined,
         };
 
-        const containerClass = isCompact 
+        const containerClass = isCompact
           ? 'flex items-center justify-center mb-2'
-          : 'flex items-center rounded-md shadow-sm border border-slate-200 hover:opacity-90 transition-colors select-none mb-2';
+          : `flex items-center rounded-md shadow-sm border border-slate-200 hover:opacity-90 transition-colors select-none mb-2 ${hintRingClass || ''}`;
 
         return (
           <div
@@ -39,9 +45,10 @@ export default function DraggableDoctor({ doctor, index, style, isDragDisabled, 
             data-testid={`schedule-sidebar-doctor-${doctor.id}`}
             className={containerClass}
             style={containerStyle}
+            title={!isCompact ? hintTitle : undefined}
           >
             {isCompact ? (
-              <div 
+              <div
                 className="flex items-center justify-center rounded-md font-bold border shadow-lg ring-2 ring-indigo-400 w-full h-full"
                 style={{
                   backgroundColor: style?.backgroundColor || '#ffffff',
@@ -53,7 +60,7 @@ export default function DraggableDoctor({ doctor, index, style, isDragDisabled, 
               </div>
             ) : (
               <>
-                <div 
+                <div
                   {...provided.dragHandleProps}
                   data-testid={`schedule-sidebar-doctor-handle-${doctor.id}`}
                   className={`flex-shrink-0 font-bold text-xs h-full py-2 bg-white/50 rounded-l-md flex items-center justify-center cursor-grab active:cursor-grabbing hover:bg-black/10 transition-colors ${isCompactMode ? 'w-11' : 'w-10'}`}

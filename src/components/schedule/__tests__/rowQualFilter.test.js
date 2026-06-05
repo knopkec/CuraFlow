@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { buildRowQualSets, matchesRowQualFilter, rowKey } from '../rowQualFilter';
+import {
+    buildRowQualSets,
+    matchesRowQualFilter,
+    getDoctorRowQualHint,
+    getDoctorRowQualRingClass,
+    rowKey,
+} from '../rowQualFilter';
 
 describe('rowQualFilter helpers', () => {
     describe('buildRowQualSets', () => {
@@ -14,7 +20,7 @@ describe('rowQualFilter helpers', () => {
             expect(result).toEqual({ requiredIds: [], optionalIds: [], discouragedIds: [], excludeIds: [] });
         });
 
-        it('separates Pflicht into requiredIds (AND), Sollte into optionalIds (OR), Sollte-nicht into discouragedIds, Nicht into excludeIds', () => {
+        it('separates Pflicht into requiredIds, Sollte into optionalIds, Sollte-nicht into discouragedIds, Nicht into excludeIds', () => {
             const result = buildRowQualSets({
                 workplaceId: 'wp-1',
                 getRequired: () => ['q-pflicht'],
@@ -52,6 +58,7 @@ describe('rowQualFilter helpers', () => {
             });
             expect(result.requiredIds).toEqual([]);
             expect(result.optionalIds).toEqual(['q1']);
+            expect(result.discouragedIds).toEqual([]);
             expect(result.excludeIds).toEqual(['q2']);
         });
     });
@@ -64,40 +71,40 @@ describe('rowQualFilter helpers', () => {
 
         it('passes when filter has no ids (no qualifications defined)', () => {
             expect(
-                matchesRowQualFilter({ requiredIds: [], optionalIds: [], excludeIds: [] }, ['q1'])
+                matchesRowQualFilter({ requiredIds: [], optionalIds: [], discouragedIds: [], excludeIds: [] }, ['q1'])
             ).toBe(true);
         });
 
         describe('required (Pflicht) — AND', () => {
             it('passes when doctor holds all required qualifications', () => {
-                const filter = { requiredIds: ['a', 'b'], optionalIds: [], excludeIds: [] };
+                const filter = { requiredIds: ['a', 'b'], optionalIds: [], discouragedIds: [], excludeIds: [] };
                 expect(matchesRowQualFilter(filter, ['a', 'b'])).toBe(true);
                 expect(matchesRowQualFilter(filter, ['a', 'b', 'c'])).toBe(true);
             });
 
             it('rejects when doctor is missing any required qualification', () => {
-                const filter = { requiredIds: ['a', 'b'], optionalIds: [], excludeIds: [] };
+                const filter = { requiredIds: ['a', 'b'], optionalIds: [], discouragedIds: [], excludeIds: [] };
                 expect(matchesRowQualFilter(filter, ['a'])).toBe(false);
                 expect(matchesRowQualFilter(filter, ['b'])).toBe(false);
                 expect(matchesRowQualFilter(filter, ['c'])).toBe(false);
             });
         });
 
-        describe('optional (Sollte|Sollte-nicht) — OR', () => {
+        describe('optional (Sollte) — OR', () => {
             it('passes when doctor holds at least one optional qualification', () => {
-                const filter = { requiredIds: [], optionalIds: ['a', 'b'], excludeIds: [] };
+                const filter = { requiredIds: [], optionalIds: ['a', 'b'], discouragedIds: [], excludeIds: [] };
                 expect(matchesRowQualFilter(filter, ['a'])).toBe(true);
                 expect(matchesRowQualFilter(filter, ['b'])).toBe(true);
             });
 
             it('rejects when doctor holds none of the optional qualifications', () => {
-                const filter = { requiredIds: [], optionalIds: ['a', 'b'], excludeIds: [] };
+                const filter = { requiredIds: [], optionalIds: ['a', 'b'], discouragedIds: [], excludeIds: [] };
                 expect(matchesRowQualFilter(filter, ['c'])).toBe(false);
                 expect(matchesRowQualFilter(filter, [])).toBe(false);
             });
 
-            it('skipped when no positive intent (no required, no optional, only excludes)', () => {
-                const filter = { requiredIds: [], optionalIds: [], excludeIds: ['n1'] };
+            it('skipped when no positive intent (only excludes configured)', () => {
+                const filter = { requiredIds: [], optionalIds: [], discouragedIds: [], excludeIds: ['n1'] };
                 expect(matchesRowQualFilter(filter, ['a'])).toBe(true);
                 expect(matchesRowQualFilter(filter, [])).toBe(true);
             });
@@ -111,62 +118,51 @@ describe('rowQualFilter helpers', () => {
             });
         });
 
-        describe('discouraged (Sollte-nicht) — soft exclude with fallback', () => {
-            it('excludes doctors with discouraged qualification when a preferred candidate exists', () => {
+        describe('Sollte-nicht is NOT a filter (visual hint only)', () => {
+            it('does NOT exclude a doctor with discouraged qualification', () => {
+                // This is the whole point of the redesign: Sollte-nicht is a
+                // suggestion, not a hard rule. The doctor is allowed through
+                // so the planner can still see — and choose — them, but the
+                // UI flags the doctor chip with a red ring.
                 const filter = { requiredIds: ['a'], optionalIds: [], discouragedIds: ['d1'], excludeIds: [] };
-                const allDoctors = [
-                    { id: 'd1', qualification_ids: ['a', 'd1'] }, // preferred but discouraged
-                    { id: 'd2', qualification_ids: ['a'] },        // preferred, clean
-                ];
-                expect(matchesRowQualFilter(filter, ['a', 'd1'], allDoctors)).toBe(false);
-                expect(matchesRowQualFilter(filter, ['a'], allDoctors)).toBe(true);
+                expect(matchesRowQualFilter(filter, ['a', 'd1'])).toBe(true);
+                expect(matchesRowQualFilter(filter, ['a'])).toBe(true);
             });
 
-            it('relaxes discouraged rule when no clean preferred candidate exists', () => {
-                // The only doctor in the list passes the preferred rule (optional 'a')
-                // but is also discouraged ('d1'). The relaxed rule must let this
-                // doctor through so the staffing list is not empty.
-                const filter = { requiredIds: [], optionalIds: ['a'], discouragedIds: ['d1'], excludeIds: [] };
-                const allDoctors = [
-                    { id: 'd1', qualification_ids: ['a', 'd1'] },
-                ];
-                expect(matchesRowQualFilter(filter, ['a', 'd1'], allDoctors)).toBe(true);
-            });
-
-            it('passes when doctor is clean of discouraged qualifications', () => {
+            it('does NOT exclude when only discouraged is configured', () => {
                 const filter = { requiredIds: [], optionalIds: [], discouragedIds: ['d1'], excludeIds: [] };
+                expect(matchesRowQualFilter(filter, ['d1'])).toBe(true);
                 expect(matchesRowQualFilter(filter, ['a'])).toBe(true);
             });
         });
 
-        describe('combined: required AND, optional OR, discouraged soft, exclude AND-NOT', () => {
+        describe('combined: required AND, optional OR, exclude AND-NOT', () => {
             const filter = {
                 requiredIds: ['a', 'b'],
                 optionalIds: ['c', 'd'],
-                discouragedIds: ['x'],
+                discouragedIds: ['x'], // ignored by the strict filter
                 excludeIds: ['z'],
             };
 
-            it('passes with all required, one optional, no discourage, no exclude', () => {
+            it('passes with all required, one optional, no exclude', () => {
                 expect(matchesRowQualFilter(filter, ['a', 'b', 'c'])).toBe(true);
                 expect(matchesRowQualFilter(filter, ['a', 'b', 'd'])).toBe(true);
             });
 
-            it('rejects when missing any required (AND semantics)', () => {
+            it('passes even when holding the discouraged qualification', () => {
+                expect(matchesRowQualFilter(filter, ['a', 'b', 'c', 'x'])).toBe(true);
+            });
+
+            it('rejects when missing any required', () => {
                 expect(matchesRowQualFilter(filter, ['a', 'c'])).toBe(false);
             });
 
-            it('rejects when missing all optional (OR semantics)', () => {
+            it('rejects when missing all optional', () => {
                 expect(matchesRowQualFilter(filter, ['a', 'b'])).toBe(false);
-                expect(matchesRowQualFilter(filter, ['a', 'b', 'e'])).toBe(false);
             });
 
             it('rejects when holding an exclude qualification', () => {
                 expect(matchesRowQualFilter(filter, ['a', 'b', 'c', 'z'])).toBe(false);
-            });
-
-            it('rejects when holding a discouraged qualification (preferred path)', () => {
-                expect(matchesRowQualFilter(filter, ['a', 'b', 'c', 'x'])).toBe(false);
             });
         });
 
@@ -183,6 +179,59 @@ describe('rowQualFilter helpers', () => {
             expect(matchesRowQualFilter(filter, ['a', 'b'])).toBe(true);
             expect(matchesRowQualFilter(filter, ['n1'])).toBe(false);
             expect(matchesRowQualFilter(filter, ['a', 'n1'])).toBe(false);
+        });
+    });
+
+    describe('getDoctorRowQualHint', () => {
+        it('returns null when no filter is active', () => {
+            expect(getDoctorRowQualHint(null, ['q1'])).toBe(null);
+        });
+
+        it('returns null when no positive intent (required/optional/discouraged all empty)', () => {
+            const filter = { requiredIds: [], optionalIds: [], discouragedIds: [], excludeIds: ['n1'] };
+            expect(getDoctorRowQualHint(filter, ['n1'])).toBe(null);
+        });
+
+        it('returns "preferred" when doctor holds an optional qualification', () => {
+            const filter = { requiredIds: [], optionalIds: ['a'], discouragedIds: [], excludeIds: [] };
+            expect(getDoctorRowQualHint(filter, ['a'])).toBe('preferred');
+        });
+
+        it('returns "discouraged" when doctor holds a discouraged qualification', () => {
+            const filter = { requiredIds: [], optionalIds: [], discouragedIds: ['d1'], excludeIds: [] };
+            expect(getDoctorRowQualHint(filter, ['d1'])).toBe('discouraged');
+        });
+
+        it('returns "discouraged" when doctor holds both preferred and discouraged (warning wins)', () => {
+            const filter = { requiredIds: [], optionalIds: ['a'], discouragedIds: ['d1'], excludeIds: [] };
+            expect(getDoctorRowQualHint(filter, ['a', 'd1'])).toBe('discouraged');
+        });
+
+        it('returns null when doctor holds none of the optional/discouraged qualifications', () => {
+            const filter = { requiredIds: [], optionalIds: ['a'], discouragedIds: ['d1'], excludeIds: [] };
+            expect(getDoctorRowQualHint(filter, ['b'])).toBe(null);
+        });
+
+        it('treats missing doctorQualIds as empty', () => {
+            const filter = { requiredIds: [], optionalIds: ['a'], discouragedIds: [], excludeIds: [] };
+            expect(getDoctorRowQualHint(filter, undefined)).toBe(null);
+            expect(getDoctorRowQualHint(filter, null)).toBe(null);
+        });
+    });
+
+    describe('getDoctorRowQualRingClass', () => {
+        it('returns emerald ring for "preferred"', () => {
+            expect(getDoctorRowQualRingClass('preferred')).toBe('ring-2 ring-emerald-500');
+        });
+
+        it('returns rose ring for "discouraged"', () => {
+            expect(getDoctorRowQualRingClass('discouraged')).toBe('ring-2 ring-rose-500');
+        });
+
+        it('returns null for null/undefined hint', () => {
+            expect(getDoctorRowQualRingClass(null)).toBe(null);
+            expect(getDoctorRowQualRingClass(undefined)).toBe(null);
+            expect(getDoctorRowQualRingClass('something-else')).toBe(null);
         });
     });
 

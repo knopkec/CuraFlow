@@ -1,25 +1,23 @@
 // Pure helpers for the row-scoped qualification filter in the scheduler.
 //
 // Row semantics (mirrors WorkplaceQualificationEditor state cycle):
-//   - Pflicht          (is_mandatory=true,  is_excluded=false)  -> REQUIRED (AND over all)
-//   - Sollte           (is_mandatory=false, is_excluded=false)  -> OPTIONAL (OR over all)
-//   - Sollte nicht     (is_mandatory=true,  is_excluded=true)   -> DISCOURAGED (soft exclude)
-//   - Nicht           (is_mandatory=false, is_excluded=true)   -> EXCLUDED (hard AND-NOT)
+//   - Pflicht          (is_mandatory=true,  is_excluded=false) -> REQUIRED (AND over all)
+//   - Sollte           (is_mandatory=false, is_excluded=false) -> OPTIONAL (OR over all)
+//   - Sollte nicht     (is_mandatory=true,  is_excluded=true)  -> DISCOURAGED (visual hint only, NOT a filter)
+//   - Nicht           (is_mandatory=false, is_excluded=true)  -> EXCLUDED (AND-NOT)
 //
-// Matching rule (in order, short-circuit):
-//   1. EXCLUDED: if any Nicht is configured, doctor must hold NONE of them.
-//   2. REQUIRED: if any Pflicht is configured, doctor must hold ALL of them.
-//   3. OPTIONAL: if any Sollte is configured, doctor must hold at least one.
-//   4. DISCOURAGED: if any Sollte-nicht is configured, doctor should hold NONE
-//      of them — UNLESS no doctor would otherwise pass the required/optional
-//      rule. In that degraded fallback we relax the discouraged set to avoid
-//      returning zero candidates when staffing is required.
+// Matching rule (strict, evaluated in order, short-circuit):
+//   1. EXCLUDED (Nicht): doctor must hold NONE of them.
+//   2. REQUIRED (Pflicht): doctor must hold ALL of them.
+//   3. OPTIONAL (Sollte): doctor must hold at least one of them.
+//      (When only Nicht is configured, all other doctors remain visible
+//      because no positive intent is inferred.)
 //
-// Activation: clicking the hover filter icon on a row whose workplace has
-// configured qualifications builds a { requiredIds, optionalIds,
-// discouragedIds, excludeIds } quadruple and stores it as the single active
-// row filter. Clicking the same row again clears it. Activating on another
-// row replaces it.
+// DISCOURAGED (Sollte-nicht) is NOT applied as a filter. Instead, the UI
+// surfaces a red ring on the doctor chip in the sidebar and Anwesend
+// areas to nudge the planner away from those candidates. OPTIONAL
+// (Sollte) candidates receive a green ring to suggest they are
+// preferred when multiple options are available.
 
 /**
  * Build the qualification sets for a workplace from the four getter functions
@@ -52,19 +50,37 @@ export function buildRowQualSets({ workplaceId, getRequired, getOptional, getDis
 }
 
 /**
- * Test whether a single doctor passes the strict (preferred) part of the row
- * filter: EXCLUDED, REQUIRED, OPTIONAL. Does NOT yet apply the soft
- * DISCOURAGED rule.
+ * Test whether a doctor passes the active row filter.
  *
- * @param {object} filter
+ * Rule (strict, evaluated in order, short-circuit):
+ *   1. filter null/empty -> true
+ *   2. EXCLUDED (Nicht): doctor must hold NONE of them.
+ *   3. REQUIRED (Pflicht): doctor must hold ALL of them.
+ *   4. OPTIONAL (Sollte): doctor must hold at least one of them.
+ *      (skipped when no positive intent was configured)
+ *
+ * Sollte-nicht is intentionally NOT a filter criterion here — see the
+ * `getDoctorRowQualHint` helper for the visual hint.
+ *
+ * @param {object|null|undefined} filter  { requiredIds, optionalIds, discouragedIds, excludeIds }
  * @param {string[]} doctorQualIds
  * @returns {boolean}
  */
-function passesPreferredRule(filter, doctorQualIds) {
+export function matchesRowQualFilter(filter, doctorQualIds) {
+    if (!filter) return true;
+
     const ids = doctorQualIds || [];
     const required = filter.requiredIds || [];
     const optional = filter.optionalIds || [];
     const exclude = filter.excludeIds || [];
+
+    if (
+        required.length === 0
+        && optional.length === 0
+        && exclude.length === 0
+    ) {
+        return true;
+    }
 
     if (exclude.length > 0 && exclude.some((qid) => ids.includes(qid))) {
         return false;
@@ -82,80 +98,47 @@ function passesPreferredRule(filter, doctorQualIds) {
 }
 
 /**
- * Test whether a doctor holds none of the DISCOURAGED (Sollte-nicht) qualifications.
+ * Visual hint for a single doctor given the row filter. Sollte-nicht is
+ * surfaced here as a red ring; Sollte as a green ring. The ring is
+ * orthogonal to the strict filter — a doctor can still pass the filter
+ * while being discouraged, in which case the planner gets a visual
+ * warning that this candidate is suboptimal.
+ *
+ * Returns one of:
+ *   - 'preferred'   doctor holds at least one Sollte qualification
+ *   - 'discouraged' doctor holds at least one Sollte-nicht qualification
+ *                    (takes precedence when both apply, to flag the warning)
+ *   - null          no row filter active, or no matching hint
  */
-function isCleanOfDiscouraged(filter, doctorQualIds) {
-    const discouraged = filter.discouragedIds || [];
-    if (discouraged.length === 0) return true;
+export function getDoctorRowQualHint(filter, doctorQualIds) {
+    if (!filter) return null;
     const ids = doctorQualIds || [];
-    return !discouraged.some((qid) => ids.includes(qid));
+    const optional = filter.optionalIds || [];
+    const discouraged = filter.discouragedIds || [];
+
+    if (optional.length === 0 && discouraged.length === 0) return null;
+
+    const isDiscouraged = discouraged.length > 0 && discouraged.some((qid) => ids.includes(qid));
+    if (isDiscouraged) return 'discouraged';
+
+    const isPreferred = optional.length > 0 && optional.some((qid) => ids.includes(qid));
+    if (isPreferred) return 'preferred';
+
+    return null;
 }
 
 /**
- * Test whether a doctor passes the active row filter.
- *
- * Rule (evaluated in order, short-circuit):
- *   1. filter null/empty -> true
- *   2. EXCLUDED (Nicht): doctor must hold NONE of them.
- *   3. REQUIRED (Pflicht): doctor must hold ALL of them.
- *   4. OPTIONAL (Sollte): doctor must hold at least one of them.
- *      (When only Nicht or only Sollte-nicht are configured, all other
- *      doctors remain visible because no positive intent is inferred.)
- *   5. DISCOURAGED (Sollte-nicht): doctor should hold NONE of them. If no
- *      doctor in the doctor list would otherwise pass the preferred rule,
- *      we relax the discouraged constraint so staffing is always possible.
- *
- * @param {object|null|undefined} filter  { requiredIds, optionalIds, discouragedIds, excludeIds }
- * @param {string[]} doctorQualIds
- * @param {Array<{qualification_ids?: string[]}>} [allDoctors] optional: all doctors
- *        in the tenant. Required only when a discouraged set is configured and
- *        we need to detect the empty-result fallback.
- * @returns {boolean}
+ * Tailwind class fragment for the chip ring. Returns null when no hint is
+ * active so the caller can keep the chip clean.
  */
-export function matchesRowQualFilter(filter, doctorQualIds, allDoctors = null) {
-    if (!filter) return true;
-
-    const required = filter.requiredIds || [];
-    const optional = filter.optionalIds || [];
-    const discouraged = filter.discouragedIds || [];
-    const exclude = filter.excludeIds || [];
-
-    if (
-        required.length === 0
-        && optional.length === 0
-        && discouraged.length === 0
-        && exclude.length === 0
-    ) {
-        return true;
+export function getDoctorRowQualRingClass(hint) {
+    if (hint === 'preferred') {
+        return 'ring-2 ring-emerald-500';
     }
-
-    if (!passesPreferredRule(filter, doctorQualIds)) {
-        return false;
+    if (hint === 'discouraged') {
+        return 'ring-2 ring-rose-500';
     }
-
-    if (discouraged.length === 0) {
-        return true;
-    }
-
-    if (isCleanOfDiscouraged(filter, doctorQualIds)) {
-        return true;
-    }
-
-    // Doctor is discouraged. Check if any other doctor would pass BOTH the
-    // preferred rule AND the discouraged check. If so, this doctor must be
-    // rejected (we have a clean preferred candidate). Otherwise we relax
-    // discouraged to avoid an empty staffing list.
-    if (Array.isArray(allDoctors) && allDoctors.length > 0) {
-        const anyCleanPreferredCandidateExists = allDoctors.some((doc) => {
-            const docIds = doc.qualification_ids || [];
-            return passesPreferredRule(filter, docIds) && isCleanOfDiscouraged(filter, docIds);
-        });
-        if (!anyCleanPreferredCandidateExists) {
-            return true;
-        }
-    }
-
-    return false;
+    return null;
 }
 
 /**

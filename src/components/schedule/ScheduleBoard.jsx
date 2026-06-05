@@ -46,7 +46,7 @@ import { isWishOnDate } from '@/utils/wishRange';
 import { useShiftValidation } from '@/components/validation/useShiftValidation';
 import { useOverrideValidation } from '@/components/validation/useOverrideValidation';
 import { useAllDoctorQualifications, useAllWorkplaceQualifications, useQualifications } from '@/hooks/useQualifications';
-import { buildRowQualSets, matchesRowQualFilter, rowKey as buildRowFilterKey } from '@/components/schedule/rowQualFilter';
+import { buildRowQualSets, matchesRowQualFilter, getDoctorRowQualHint, getDoctorRowQualRingClass, rowKey as buildRowFilterKey } from '@/components/schedule/rowQualFilter';
 import OverrideConfirmDialog from '@/components/validation/OverrideConfirmDialog';
 // trackDbChange removed - MySQL mode doesn't use auto-backup
 import { useHolidays } from '@/components/useHolidays';
@@ -4724,14 +4724,22 @@ export default function ScheduleBoard() {
                                                                               <Draggable key={`split-available-${doc.id}-${dateStr}`} draggableId={`${SPLIT_DRAG_PREFIX}available-doc-${doc.id}-${dateStr}`} index={idx} isDragDisabled={isReadOnly}>
                                                                                   {(provided, snapshot) => {
                                                                                       const { style, wishClass, tooltipText } = getAvailableDoctorWishPresentation(doc, dateStr);
+                                                                                      const splitQualIds = rowQualFilter ? getDoctorQualIds(doc.id) : [];
+                                                                                      const splitHint = rowQualFilter ? getDoctorRowQualHint(rowQualFilter, splitQualIds) : null;
+                                                                                      const splitHintRing = getDoctorRowQualRingClass(splitHint);
+                                                                                      const splitHintTitle = splitHint === 'preferred'
+                                                                                          ? 'Sollte (bevorzugt)'
+                                                                                          : splitHint === 'discouraged'
+                                                                                              ? 'Sollte nicht (möglich, aber ungünstig)'
+                                                                                              : null;
                                                                                       return (
                                                                                           <div
                                                                                               ref={provided.innerRef}
                                                                                               {...provided.draggableProps}
                                                                                               {...provided.dragHandleProps}
                                                                                               style={{ ...provided.draggableProps.style, ...style }}
-                                                                                              className={`relative ${isMonthView ? 'text-[9px] px-1 py-0.5 max-w-[44px] whitespace-nowrap' : 'text-[10px] px-1.5 py-0.5 max-w-[100px] truncate'} rounded border shadow-sm select-none ${snapshot.isDragging ? 'opacity-50 ring-2 ring-indigo-500 z-50' : ''} ${wishClass}`}
-                                                                                              title={tooltipText}
+                                                                                              className={`relative ${isMonthView ? 'text-[9px] px-1 py-0.5 max-w-[44px] whitespace-nowrap' : 'text-[10px] px-1.5 py-0.5 max-w-[100px] truncate'} rounded border shadow-sm select-none ${snapshot.isDragging ? 'opacity-50 ring-2 ring-indigo-500 z-50' : ''} ${splitHintRing || ''} ${wishClass}`}
+                                                                                              title={splitHintTitle ? `${splitHintTitle} — ${tooltipText}` : tooltipText}
                                                                                           >
                                                                                               {getDoctorChipLabel(doc)}
                                                                                               {lateRotationIndicatorByDoctorDay.get(`${doc.id}__${dateStr}`) && (
@@ -5340,12 +5348,15 @@ export default function ScheduleBoard() {
                         <div ref={provided.innerRef} {...provided.droppableProps} className="space-y-1">
                             {sidebarDoctors.map((doctor, index) => {
                                 const sidebarDoctor = getDoctorWithEffectiveFte(doctor, viewMode === 'month' ? currentDate : weekDays[0]);
+                                const doctorQualIds = rowQualFilter ? getDoctorQualIds(doctor.id) : [];
+                                const doctorHint = rowQualFilter ? getDoctorRowQualHint(rowQualFilter, doctorQualIds) : null;
+                                const doctorHintRingClass = getDoctorRowQualRingClass(doctorHint);
 
                                 return (
-                                    <DraggableDoctor 
-                                        key={doctor.id} 
-                                        doctor={sidebarDoctor} 
-                                        index={index} 
+                                    <DraggableDoctor
+                                        key={doctor.id}
+                                        doctor={sidebarDoctor}
+                                        index={index}
                                         style={getRoleColor(doctor.role)}
                                         compactLabel={getDoctorChipLabel(doctor)}
                                         isCompactMode={isMonthView}
@@ -5355,6 +5366,8 @@ export default function ScheduleBoard() {
                                         centralEmployee={doctor.central_employee_id ? centralEmployeesById.get(String(doctor.central_employee_id)) : null}
                                         plannedHours={weeklyPlannedHours.get(doctor.id) || 0}
                                         showTimeAccount={showSidebarTimeAccount}
+                                        hintRingClass={doctorHintRingClass}
+                                        hintKind={doctorHint}
                                     />
                                 );
                             })}
@@ -5738,6 +5751,14 @@ export default function ScheduleBoard() {
                                                                         if (!wishClass) {
                                                                             wishClass = baseWishClass;
                                                                         }
+                                                                        const availableDocQualIds = rowQualFilter ? getDoctorQualIds(doc.id) : [];
+                                                                        const availableDocHint = rowQualFilter ? getDoctorRowQualHint(rowQualFilter, availableDocQualIds) : null;
+                                                                        const availableDocHintRing = getDoctorRowQualRingClass(availableDocHint);
+                                                                        const hintTitle = availableDocHint === 'preferred'
+                                                                            ? 'Sollte (bevorzugt)'
+                                                                            : availableDocHint === 'discouraged'
+                                                                                ? 'Sollte nicht (möglich, aber ungünstig)'
+                                                                                : null;
 
                                                                         return (
                                                                             <div
@@ -5749,9 +5770,10 @@ export default function ScheduleBoard() {
                                                                                 className={`
                                                                                     relative ${isMonthView ? 'text-[9px] px-1 py-0.5 max-w-[44px] whitespace-nowrap' : 'text-[10px] px-1.5 py-0.5 max-w-[100px] truncate'} rounded border shadow-sm select-none
                                                                                     ${snapshot.isDragging ? 'opacity-50 ring-2 ring-indigo-500 z-50' : ''}
+                                                                                    ${availableDocHintRing || ''}
                                                                                     ${wishClass}
                                                                                 `}
-                                                                                title={tooltipText}
+                                                                                title={hintTitle ? `${hintTitle} — ${tooltipText}` : tooltipText}
                                                                             >
                                                                                 {getDoctorChipLabel(doc)}
                                                                                 {lateRotationIndicatorByDoctorDay.get(`${doc.id}__${dateStr}`) && (
