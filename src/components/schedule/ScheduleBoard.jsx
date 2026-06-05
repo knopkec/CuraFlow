@@ -1764,20 +1764,27 @@ export default function ScheduleBoard() {
         return selectedQualificationIds.some((qid) => ids.includes(qid));
     }, [selectedQualificationIds, getDoctorQualIds]);
 
-    // Row-scoped qualification filter: Pflicht (AND), Sollte|Sollte-nicht (OR), Nicht (exclude).
+    // Row-scoped qualification filter: Pflicht (AND), Sollte (OR), Sollte-nicht
+    // (soft exclude with empty-candidate fallback), Nicht (hard AND-NOT).
     // AND-combined with the global schedule filter.
     const matchesRowQualificationFilter = useCallback((doctor) => {
         if (!rowQualFilter) return true;
         const ids = getDoctorQualIds(doctor.id);
+        const doctorList = doctors.map((d) => ({
+            id: d.id,
+            qualification_ids: getDoctorQualIds(d.id),
+        }));
         return matchesRowQualFilter(
             {
                 requiredIds: rowQualFilter.requiredIds,
                 optionalIds: rowQualFilter.optionalIds,
+                discouragedIds: rowQualFilter.discouragedIds,
                 excludeIds: rowQualFilter.excludeIds,
             },
             ids,
+            doctorList,
         );
-    }, [rowQualFilter, getDoctorQualIds]);
+    }, [rowQualFilter, getDoctorQualIds, doctors]);
 
     const matchesAllQualificationFilters = useCallback((doctor) => {
         return matchesScheduleQualificationFilter(doctor) && matchesRowQualificationFilter(doctor);
@@ -1791,14 +1798,19 @@ export default function ScheduleBoard() {
             setRowQualFilter(null);
             return;
         }
-        const { requiredIds, optionalIds, excludeIds } = buildRowQualSets({
+        const { requiredIds, optionalIds, discouragedIds, excludeIds } = buildRowQualSets({
             workplaceId: rowWorkplace.id,
             getRequired: getWpRequiredQualIds,
             getOptional: getWpOptionalQualIds,
             getDiscouraged: getWpDiscouragedQualIds,
             getExcluded: getWpExcludedQualIds,
         });
-        if (requiredIds.length === 0 && optionalIds.length === 0 && excludeIds.length === 0) {
+        if (
+            requiredIds.length === 0
+            && optionalIds.length === 0
+            && discouragedIds.length === 0
+            && excludeIds.length === 0
+        ) {
             // No qualifications defined for this workplace -> nothing to filter on.
             return;
         }
@@ -1808,6 +1820,7 @@ export default function ScheduleBoard() {
             workplaceId: rowWorkplace.id,
             requiredIds,
             optionalIds,
+            discouragedIds,
             excludeIds,
         });
     }, [rowQualFilter, getWpRequiredQualIds, getWpOptionalQualIds, getWpDiscouragedQualIds, getWpExcludedQualIds]);
@@ -4591,7 +4604,7 @@ export default function ScheduleBoard() {
                                           getDiscouraged: getWpDiscouragedQualIds,
                                           getExcluded: getWpExcludedQualIds,
                                       });
-                                      return requiredIds.length > 0 || optionalIds.length > 0 || excludeIds.length > 0;
+                                      return requiredIds.length > 0 || optionalIds.length > 0 || discouragedIds.length > 0 || excludeIds.length > 0;
                                   })();
 
                                   const rawHeaderDroppableId = `rowHeader__${rowName}${rowTimeslotId ? '__' + rowTimeslotId : ''}`;
