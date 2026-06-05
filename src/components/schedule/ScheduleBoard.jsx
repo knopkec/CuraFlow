@@ -1764,13 +1764,17 @@ export default function ScheduleBoard() {
         return selectedQualificationIds.some((qid) => ids.includes(qid));
     }, [selectedQualificationIds, getDoctorQualIds]);
 
-    // Row-scoped qualification filter: include = Pflicht|Sollte|Sollte-nicht (OR),
-    // exclude = Nicht. AND-combined with the global schedule filter.
+    // Row-scoped qualification filter: Pflicht (AND), Sollte|Sollte-nicht (OR), Nicht (exclude).
+    // AND-combined with the global schedule filter.
     const matchesRowQualificationFilter = useCallback((doctor) => {
         if (!rowQualFilter) return true;
         const ids = getDoctorQualIds(doctor.id);
         return matchesRowQualFilter(
-            { includeIds: rowQualFilter.includeIds, excludeIds: rowQualFilter.excludeIds },
+            {
+                requiredIds: rowQualFilter.requiredIds,
+                optionalIds: rowQualFilter.optionalIds,
+                excludeIds: rowQualFilter.excludeIds,
+            },
             ids,
         );
     }, [rowQualFilter, getDoctorQualIds]);
@@ -1787,14 +1791,14 @@ export default function ScheduleBoard() {
             setRowQualFilter(null);
             return;
         }
-        const { includeIds, excludeIds } = buildRowQualSets({
+        const { requiredIds, optionalIds, excludeIds } = buildRowQualSets({
             workplaceId: rowWorkplace.id,
             getRequired: getWpRequiredQualIds,
             getOptional: getWpOptionalQualIds,
             getDiscouraged: getWpDiscouragedQualIds,
             getExcluded: getWpExcludedQualIds,
         });
-        if (includeIds.length === 0 && excludeIds.length === 0) {
+        if (requiredIds.length === 0 && optionalIds.length === 0 && excludeIds.length === 0) {
             // No qualifications defined for this workplace -> nothing to filter on.
             return;
         }
@@ -1802,7 +1806,8 @@ export default function ScheduleBoard() {
             key,
             sourceName: rowWorkplace.name || rowName,
             workplaceId: rowWorkplace.id,
-            includeIds,
+            requiredIds,
+            optionalIds,
             excludeIds,
         });
     }, [rowQualFilter, getWpRequiredQualIds, getWpOptionalQualIds, getWpDiscouragedQualIds, getWpExcludedQualIds]);
@@ -4579,14 +4584,14 @@ export default function ScheduleBoard() {
                                       && rowQualFilter.key === buildRowFilterKey(rowName, rowTimeslotId);
                                   const hasRowQuals = (() => {
                                       if (!rowWorkplace?.id) return false;
-                                      const { includeIds, excludeIds } = buildRowQualSets({
+                                      const { requiredIds, optionalIds, excludeIds } = buildRowQualSets({
                                           workplaceId: rowWorkplace.id,
                                           getRequired: getWpRequiredQualIds,
                                           getOptional: getWpOptionalQualIds,
                                           getDiscouraged: getWpDiscouragedQualIds,
                                           getExcluded: getWpExcludedQualIds,
                                       });
-                                      return includeIds.length > 0 || excludeIds.length > 0;
+                                      return requiredIds.length > 0 || optionalIds.length > 0 || excludeIds.length > 0;
                                   })();
 
                                   const rawHeaderDroppableId = `rowHeader__${rowName}${rowTimeslotId ? '__' + rowTimeslotId : ''}`;
@@ -5544,14 +5549,14 @@ export default function ScheduleBoard() {
                             && rowQualFilter.key === buildRowFilterKey(rowName, rowTimeslotId);
                         const hasRowQuals = (() => {
                             if (!rowWorkplace?.id) return false;
-                            const { includeIds, excludeIds } = buildRowQualSets({
+                            const { requiredIds, optionalIds, excludeIds } = buildRowQualSets({
                                 workplaceId: rowWorkplace.id,
                                 getRequired: getWpRequiredQualIds,
                                 getOptional: getWpOptionalQualIds,
                                 getDiscouraged: getWpDiscouragedQualIds,
                                 getExcluded: getWpExcludedQualIds,
                             });
-                            return includeIds.length > 0 || excludeIds.length > 0;
+                            return requiredIds.length > 0 || optionalIds.length > 0 || excludeIds.length > 0;
                         })();
 
                         const headerDroppableId = `rowHeader__${rowName}${rowTimeslotId ? '__' + rowTimeslotId : ''}`;

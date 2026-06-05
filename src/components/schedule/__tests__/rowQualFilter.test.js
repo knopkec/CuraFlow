@@ -11,10 +11,10 @@ describe('rowQualFilter helpers', () => {
                 getDiscouraged: () => ['c'],
                 getExcluded: () => ['d'],
             });
-            expect(result).toEqual({ includeIds: [], excludeIds: [] });
+            expect(result).toEqual({ requiredIds: [], optionalIds: [], excludeIds: [] });
         });
 
-        it('combines Pflicht, Sollte, and Sollte-nicht into includeIds', () => {
+        it('separates Pflicht into requiredIds (AND), Sollte|Sollte-nicht into optionalIds (OR), Nicht into excludeIds', () => {
             const result = buildRowQualSets({
                 workplaceId: 'wp-1',
                 getRequired: () => ['q-pflicht'],
@@ -22,21 +22,24 @@ describe('rowQualFilter helpers', () => {
                 getDiscouraged: () => ['q-sollte-nicht'],
                 getExcluded: () => ['q-nicht'],
             });
-            expect(result.includeIds).toEqual(
-                expect.arrayContaining(['q-pflicht', 'q-sollte', 'q-sollte-nicht'])
+            expect(result.requiredIds).toEqual(['q-pflicht']);
+            expect(result.optionalIds).toEqual(
+                expect.arrayContaining(['q-sollte', 'q-sollte-nicht'])
             );
             expect(result.excludeIds).toEqual(['q-nicht']);
         });
 
-        it('deduplicates ids appearing in multiple include sets', () => {
+        it('deduplicates ids within each set', () => {
             const result = buildRowQualSets({
                 workplaceId: 'wp-1',
                 getRequired: () => ['q1', 'q2'],
                 getOptional: () => ['q1', 'q3'],
                 getDiscouraged: () => ['q2'],
-                getExcluded: () => [],
+                getExcluded: () => ['q1'],
             });
-            expect([...result.includeIds].sort()).toEqual(['q1', 'q2', 'q3']);
+            expect([...result.requiredIds].sort()).toEqual(['q1', 'q2']);
+            expect([...result.optionalIds].sort()).toEqual(['q1', 'q2', 'q3']);
+            expect(result.excludeIds).toEqual(['q1']);
         });
 
         it('tolerates missing getter functions', () => {
@@ -47,7 +50,8 @@ describe('rowQualFilter helpers', () => {
                 getDiscouraged: null,
                 getExcluded: () => ['q2'],
             });
-            expect(result.includeIds).toEqual(['q1']);
+            expect(result.requiredIds).toEqual([]);
+            expect(result.optionalIds).toEqual(['q1']);
             expect(result.excludeIds).toEqual(['q2']);
         });
     });
@@ -59,47 +63,88 @@ describe('rowQualFilter helpers', () => {
         });
 
         it('passes when filter has no ids (no qualifications defined)', () => {
-            expect(matchesRowQualFilter({ includeIds: [], excludeIds: [] }, ['q1'])).toBe(true);
+            expect(
+                matchesRowQualFilter({ requiredIds: [], optionalIds: [], excludeIds: [] }, ['q1'])
+            ).toBe(true);
         });
 
-        it('OR-includes doctors that hold at least one include qualification', () => {
-            const filter = { includeIds: ['a', 'b'], excludeIds: [] };
-            expect(matchesRowQualFilter(filter, ['a'])).toBe(true);
-            expect(matchesRowQualFilter(filter, ['b'])).toBe(true);
-            expect(matchesRowQualFilter(filter, ['a', 'b'])).toBe(true);
+        describe('required (Pflicht) — AND', () => {
+            it('passes when doctor holds all required qualifications', () => {
+                const filter = { requiredIds: ['a', 'b'], optionalIds: [], excludeIds: [] };
+                expect(matchesRowQualFilter(filter, ['a', 'b'])).toBe(true);
+                expect(matchesRowQualFilter(filter, ['a', 'b', 'c'])).toBe(true);
+            });
+
+            it('rejects when doctor is missing any required qualification', () => {
+                const filter = { requiredIds: ['a', 'b'], optionalIds: [], excludeIds: [] };
+                expect(matchesRowQualFilter(filter, ['a'])).toBe(false);
+                expect(matchesRowQualFilter(filter, ['b'])).toBe(false);
+                expect(matchesRowQualFilter(filter, ['c'])).toBe(false);
+            });
         });
 
-        it('excludes doctors that hold none of the include qualifications', () => {
-            const filter = { includeIds: ['a', 'b'], excludeIds: [] };
-            expect(matchesRowQualFilter(filter, ['c'])).toBe(false);
-            expect(matchesRowQualFilter(filter, [])).toBe(false);
+        describe('optional (Sollte|Sollte-nicht) — OR', () => {
+            it('passes when doctor holds at least one optional qualification', () => {
+                const filter = { requiredIds: [], optionalIds: ['a', 'b'], excludeIds: [] };
+                expect(matchesRowQualFilter(filter, ['a'])).toBe(true);
+                expect(matchesRowQualFilter(filter, ['b'])).toBe(true);
+            });
+
+            it('rejects when doctor holds none of the optional qualifications', () => {
+                const filter = { requiredIds: [], optionalIds: ['a', 'b'], excludeIds: [] };
+                expect(matchesRowQualFilter(filter, ['c'])).toBe(false);
+                expect(matchesRowQualFilter(filter, [])).toBe(false);
+            });
+
+            it('skipped when no positive intent (no required, no optional, only excludes)', () => {
+                const filter = { requiredIds: [], optionalIds: [], excludeIds: ['n1'] };
+                expect(matchesRowQualFilter(filter, ['a'])).toBe(true);
+                expect(matchesRowQualFilter(filter, [])).toBe(true);
+            });
         });
 
-        it('excludes doctors that hold an exclude (Nicht) qualification', () => {
-            const filter = { includeIds: ['a'], excludeIds: ['n1'] };
-            expect(matchesRowQualFilter(filter, ['a', 'n1'])).toBe(false);
-            expect(matchesRowQualFilter(filter, ['n1'])).toBe(false);
+        describe('exclude (Nicht) — AND-NOT', () => {
+            it('excludes doctors that hold an exclude qualification', () => {
+                const filter = { requiredIds: ['a'], optionalIds: [], excludeIds: ['n1'] };
+                expect(matchesRowQualFilter(filter, ['a', 'n1'])).toBe(false);
+                expect(matchesRowQualFilter(filter, ['a'])).toBe(true);
+            });
         });
 
-        it('combines include-OR with exclude-NOT', () => {
-            const filter = { includeIds: ['a', 'b'], excludeIds: ['x'] };
-            expect(matchesRowQualFilter(filter, ['a'])).toBe(true);
-            expect(matchesRowQualFilter(filter, ['b'])).toBe(true);
-            expect(matchesRowQualFilter(filter, ['c'])).toBe(false);
-            expect(matchesRowQualFilter(filter, ['a', 'x'])).toBe(false);
+        describe('combined: required AND optional OR exclude AND-NOT', () => {
+            const filter = {
+                requiredIds: ['a', 'b'],
+                optionalIds: ['c', 'd'],
+                excludeIds: ['x'],
+            };
+
+            it('passes with all required, one optional, no exclude', () => {
+                expect(matchesRowQualFilter(filter, ['a', 'b', 'c'])).toBe(true);
+                expect(matchesRowQualFilter(filter, ['a', 'b', 'd'])).toBe(true);
+            });
+
+            it('rejects when missing any required', () => {
+                expect(matchesRowQualFilter(filter, ['a', 'c'])).toBe(false);
+            });
+
+            it('rejects when missing all optional', () => {
+                expect(matchesRowQualFilter(filter, ['a', 'b'])).toBe(false);
+                expect(matchesRowQualFilter(filter, ['a', 'b', 'e'])).toBe(false);
+            });
+
+            it('rejects when holding an exclude qualification', () => {
+                expect(matchesRowQualFilter(filter, ['a', 'b', 'c', 'x'])).toBe(false);
+            });
         });
 
         it('treats missing doctorQualIds as empty array', () => {
-            const filter = { includeIds: ['a'], excludeIds: [] };
+            const filter = { requiredIds: ['a'], optionalIds: [], excludeIds: [] };
             expect(matchesRowQualFilter(filter, undefined)).toBe(false);
             expect(matchesRowQualFilter(filter, null)).toBe(false);
         });
 
-        it('when no include rule is set, only excludes apply (Nur NOT ausschließen, Rest zeigen)', () => {
-            // Row has only "Nicht" qualifications defined -> includeIds empty,
-            // excludeIds populated. Doctors without the excluded qualification
-            // must remain visible.
-            const filter = { includeIds: [], excludeIds: ['n1'] };
+        it('when only NOT is set, only excludes doctors with that qualification', () => {
+            const filter = { requiredIds: [], optionalIds: [], excludeIds: ['n1'] };
             expect(matchesRowQualFilter(filter, [])).toBe(true);
             expect(matchesRowQualFilter(filter, ['a'])).toBe(true);
             expect(matchesRowQualFilter(filter, ['a', 'b'])).toBe(true);
