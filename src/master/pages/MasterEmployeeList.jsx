@@ -13,110 +13,8 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import {
   Users, Loader2, Building2, Search, ChevronRight, ArrowUpDown,
-  Clock, UserCheck, UserX, Plus, Upload, ArrowUpRight, Trash2, Eye, EyeOff, RefreshCw, Download,
+  Clock, UserCheck, UserX, Plus, Upload, ArrowUpRight, Trash2, Eye, EyeOff, RefreshCw, Scale,
 } from 'lucide-react';
-
-const LINK_STATUS_LABELS = {
-  repair_needed: 'Verknüpfung wird repariert',
-  repaired: 'Verknüpfung repariert',
-  tenant_doctor_missing: 'Arzt im Mandant nicht gefunden',
-  unlinked: 'Nicht verknüpft',
-};
-
-function escapeCsvValue(value) {
-  const normalized = String(value ?? '');
-  if (!/[";,\n]/.test(normalized)) {
-    return normalized;
-  }
-  return `"${normalized.replace(/"/g, '""')}"`;
-}
-
-function buildDryRunCsv(report, tenantScopeLabel) {
-  const generatedAt = new Date().toISOString();
-  const header = [
-    'generated_at',
-    'tenant_scope',
-    'total_assignments',
-    'checked_assignments',
-    'would_import_absences',
-    'already_central_absences',
-    'failed_assignments',
-    'tenant_name',
-    'tenant_id',
-    'employee_name',
-    'employee_id',
-    'tenant_doctor_id',
-    'status',
-    'local_absences',
-    'would_import',
-    'already_central',
-    'central_total',
-    'would_remove_local',
-    'remaining_local',
-    'purged_empty',
-    'skipped_invalid_date',
-    'skipped_invalid_date_detail',
-    'conflicts',
-    'would_resolve_local',
-    'would_resolve_central',
-    'resolved_conflicts',
-    'unresolved_conflicts',
-    'conflict_summary',
-    'needs_action',
-    'reason',
-    'error',
-  ];
-
-  const rows = (report?.results || []).map((row) => ([
-    generatedAt,
-    tenantScopeLabel,
-    report?.totalAssignments ?? 0,
-    report?.migratedAssignments ?? 0,
-    report?.importedAbsences ?? 0,
-    report?.existingCentralAbsences ?? 0,
-    report?.failedAssignments ?? 0,
-    row.tenant_name || '',
-    row.tenant_id || '',
-    row.employee_name || '',
-    row.employee_id || '',
-    row.tenant_doctor_id || '',
-    row.status || '',
-    row.localAbsences ?? 0,
-    row.imported ?? 0,
-    row.existingCentral ?? 0,
-    row.centralTotal ?? 0,
-    row.removedLocal ?? 0,
-    row.remainingLocal ?? 0,
-    row.purgedEmpty ?? 0,
-    row.skippedInvalidDate ?? 0,
-    row.skippedInvalidDateSummary || '',
-    row.conflicts ?? 0,
-    row.wouldResolveLocal ?? 0,
-    row.wouldResolveCentral ?? 0,
-    row.resolvedConflicts ?? 0,
-    row.unresolvedConflicts ?? 0,
-    row.conflictSummary || '',
-    row.needsAction ? 'yes' : 'no',
-    row.reason || '',
-    row.error || '',
-  ]));
-
-  return [header, ...rows]
-    .map((columns) => columns.map(escapeCsvValue).join(';'))
-    .join('\n');
-}
-
-function downloadCsvFile(content, fileName) {
-  const blob = new Blob([`\ufeff${content}`], { type: 'text/csv;charset=utf-8;' });
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  window.URL.revokeObjectURL(url);
-}
 
 export default function MasterEmployeeList() {
   const navigate = useNavigate();
@@ -127,9 +25,9 @@ export default function MasterEmployeeList() {
   const [viewMode, setViewMode] = useState('central');
   const [sortField, setSortField] = useState('name');
   const [sortDir, setSortDir] = useState('asc');
-  const [showInactive, setShowInactive] = useState(false); // 'central' | 'legacy'
-  const [dryRunReport, setDryRunReport] = useState(null);
-  const [showOnlyOpen, setShowOnlyOpen] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
+  const [tariffDialogOpen, setTariffDialogOpen] = useState(false);
+  const [selectedTariffId, setSelectedTariffId] = useState('');
 
   // URL-Suchparameter synchron halten (überlebt Navigation)
   useEffect(() => {
@@ -304,22 +202,16 @@ export default function MasterEmployeeList() {
   }, [unlinkedStaff, searchQuery, sortField, sortDir]);
 
   const filteredList = viewMode === 'central' ? filteredCentral : filteredLegacy;
+  const activeDisplayedCentralEmployees = useMemo(
+    () => filteredCentral.filter((employee) => employee.is_active),
+    [filteredCentral]
+  );
 
   // KPI-Statistiken
   const inactiveCount = centralEmployees.filter(e => !e.is_active).length;
   const linkedCentralCount = centralEmployees.filter((employee) =>
     (employee.assignments || []).some((assignment) => assignment.tenant_id && assignment.tenant_doctor_id)
   ).length;
-  const linkedAssignmentCount = useMemo(() => {
-    return centralEmployees.reduce((sum, employee) => {
-      const matchingAssignments = (employee.assignments || []).filter((assignment) => {
-        if (!assignment.tenant_id || !assignment.tenant_doctor_id) return false;
-        if (selectedTenant === 'all') return true;
-        return String(assignment.tenant_id) === String(selectedTenant);
-      });
-      return sum + matchingAssignments.length;
-    }, 0);
-  }, [centralEmployees, selectedTenant]);
   const stats = useMemo(() => ({
     centralTotal: centralEmployees.length,
     centralActive: centralEmployees.filter((e) => e.is_active).length,
@@ -377,68 +269,36 @@ export default function MasterEmployeeList() {
     onError: (err) => toast.error('Globaler Zeitkonto-Sync fehlgeschlagen: ' + err.message),
   });
 
-  const linkedAbsenceMigrationMutation = useMutation({
-    mutationFn: ({ purgeEmptyDates = false, resolveConflicts = false } = {}) => api.request('/api/master/employees/migrate-linked-absences', {
-      method: 'POST',
-      body: JSON.stringify({
-        tenant_id: selectedTenant !== 'all' ? selectedTenant : null,
-        purge_empty_dates: purgeEmptyDates,
-        resolve_conflicts: resolveConflicts,
-      }),
-    }),
-    onSuccess: async (result) => {
-      if (result.totalAssignments > 0) {
-        const parts = [
-          `Verknüpfungen geprüft: ${result.migratedAssignments}/${result.totalAssignments}`,
-          `${result.importedAbsences} neu zentral`,
-          `${result.removedLocalAbsences} lokal bereinigt`,
-        ];
-        if (Number(result.purgedEmptyAbsences || 0) > 0) {
-          parts.push(`${result.purgedEmptyAbsences} leere Einträge gelöscht`);
-        }
-        if (Number(result.resolvedConflicts || 0) > 0) {
-          parts.push(`${result.resolvedConflicts} Konflikte aufgelöst`);
-        }
-        if (Number(result.unresolvedConflicts || 0) > 0) {
-          parts.push(`${result.unresolvedConflicts} Konflikte offen (Pattsituation)`);
-        }
-        if (result.failedAssignments > 0) {
-          parts.push(`${result.failedAssignments} fehlgeschlagen`);
-        }
-        if (result.failedAssignments > 0) {
-          toast.error(parts.join(', '));
-        } else {
-          toast.success(parts.join(', '));
-        }
-      } else {
-        toast.success('Keine bestehenden Verknüpfungen für die Migration gefunden');
+  // Tarifverträge laden (für Bulk-Apply)
+  const { data: tariffs = [] } = useQuery({
+    queryKey: ['master-payscale-tariffs'],
+    queryFn: async () => {
+      try {
+        const res = await api.request('/api/master/payscale-tariffs');
+        return res.tariffs || [];
+      } catch {
+        return [];
       }
-      // Refresh the dry-run report so the "offen" list reflects the cleanup
-      // we just performed instead of showing the stale pre-migration state.
-      linkedAbsenceDryRunMutation.mutate();
-      await queryClient.invalidateQueries({ queryKey: ['master-central-employees'] });
-      await queryClient.invalidateQueries({ queryKey: ['master-legacy-staff'] });
     },
-    onError: (err) => toast.error('Abwesenheits-Migration fehlgeschlagen: ' + err.message),
   });
 
-  const linkedAbsenceDryRunMutation = useMutation({
-    mutationFn: () => api.request('/api/master/employees/migrate-linked-absences', {
-      method: 'POST',
-      body: JSON.stringify({
-        tenant_id: selectedTenant !== 'all' ? selectedTenant : null,
-        dry_run: true,
+  // Bulk-apply Tarifvertrag auf aktuell gefilterte Mitarbeiter
+  const bulkApplyTariffMutation = useMutation({
+    mutationFn: ({ tariffId, employeeIds }) =>
+      api.request('/api/master/employees/bulk-apply-tariff', {
+        method: 'POST',
+        body: JSON.stringify({ tariff_id: tariffId, employee_ids: employeeIds }),
       }),
-    }),
-    onSuccess: (result) => {
-      setDryRunReport(result);
+    onSuccess: async (result) => {
       toast.success(
-        result.totalAssignments > 0
-          ? `Dry-Run fertig: ${result.assignmentsNeedingAction ?? 0} von ${result.totalAssignments} noch nicht migriert`
-          : 'Dry-Run: keine bestehenden Verknüpfungen gefunden'
+        `Tarifvertrag "${result.tariff.name}" auf ${result.updated} Mitarbeiter angewandt` +
+        (result.syncedTenants > 0 ? `, ${result.syncedTenants} Mandanten sync.` : '')
       );
+      setTariffDialogOpen(false);
+      setSelectedTariffId('');
+      await queryClient.invalidateQueries({ queryKey: ['master-central-employees'] });
     },
-    onError: (err) => toast.error('Dry-Run fehlgeschlagen: ' + err.message),
+    onError: (err) => toast.error('Tarifvertrag anwenden fehlgeschlagen: ' + err.message),
   });
 
   const handleDelete = (emp, e) => {
@@ -469,42 +329,32 @@ export default function MasterEmployeeList() {
     importMutation.mutate(items);
   };
 
-  const handleMigrateLinkedAbsences = () => {
-    const scopeLabel = selectedTenant === 'all' ? 'alle Mandanten' : 'den ausgewählten Mandanten';
-    if (!window.confirm(`Bestehende Verknüpfungen für ${scopeLabel} migrieren?\n\nDabei werden lokale Abwesenheiten bereits verknüpfter Mitarbeiter in die zentrale Speicherung übernommen und lokal entfernt.`)) {
+  const handleApplyTariffOpen = () => {
+    setSelectedTariffId('');
+    setTariffDialogOpen(true);
+  };
+
+  const handleBulkApplyTariff = () => {
+    if (!selectedTariffId) {
+      toast.error('Bitte wählen Sie einen Tarifvertrag.');
       return;
     }
-    linkedAbsenceMigrationMutation.mutate({ purgeEmptyDates: false });
-  };
-
-  const handleMigrateAndPurgeLinkedAbsences = () => {
-    const scopeLabel = selectedTenant === 'all' ? 'alle Mandanten' : 'den ausgewählten Mandanten';
-    const message = `Bestehende Verknüpfungen für ${scopeLabel} migrieren UND leere Einträge löschen?\n\nSchritt 1: Lokale Abwesenheiten werden in die zentrale Speicherung übernommen.\nSchritt 2: Lokale Abwesenheitszeilen mit LEEREM Datum (null/leer) und bekannter Abwesenheitsposition werden dauerhaft gelöscht – diese Zeilen haben keinen Tag und können nirgends angezeigt werden.\n\nZeilen mit fehlerhaftem Datumsformat (z. B. 'not-a-date', '2026-13-40') werden NICHT gelöscht – bitte im Mandanten korrigieren.`;
-    if (!window.confirm(message)) {
+    const employeeIds = activeDisplayedCentralEmployees.map(e => e.id);
+    if (employeeIds.length === 0) {
+      toast.error('Keine aktiven Mitarbeiter in der aktuellen Auswahl.');
       return;
     }
-    linkedAbsenceMigrationMutation.mutate({ purgeEmptyDates: true });
-  };
-
-  const handleMigrateAndResolveConflicts = () => {
-    const scopeLabel = selectedTenant === 'all' ? 'alle Mandanten' : 'den ausgewählten Mandanten';
-    const message = `Bestehende Verknüpfungen für ${scopeLabel} migrieren UND Konflikte am selben Tag nach Priorität auflösen?\n\nEs gilt diese Hierarchie (höher gewinnt):\n  Mutterschutz (100) > Elternzeit (90) > Krank (80) > Fortbildung (60) > Kongress (55) > Dienstreise (40) > Nicht verfügbar (30) > Urlaub (20) > Frei (10)\n\nSchritt 1: Reguläre Migration.\nSchritt 2: Für jeden Tag, an dem Mandant und Zentrale unterschiedliche Abwesenheits-Positionen halten, gewinnt die Position mit der höheren Priorität. Der zentrale Eintrag wird ggf. aktualisiert, die lokale Zeile gelöscht.\n\nPattsituationen (z. B. 'Urlaub vs. Frei', beides unbekannter Wert) werden NICHT aufgelöst – diese Zeilen bleiben als 'Konflikte offen' in der Tabelle sichtbar und müssen im Mandanten korrigiert werden.`;
-    if (!window.confirm(message)) {
+    const tariff = tariffs.find(t => t.id === selectedTariffId);
+    const tariffName = tariff?.name || selectedTariffId;
+    if (!window.confirm(
+      `Tarifvertrag "${tariffName}" auf ${employeeIds.length} aktive Mitarbeiter anwenden?\n\n` +
+      (tariff?.default_weekly_hours ? `\n- Wochenarbeitszeit: ${tariff.default_weekly_hours}h` : '') +
+      (tariff?.default_vacation_days ? `\n- Urlaubsanspruch: ${tariff.default_vacation_days} Tage` : '') +
+      '\n\nDie Werte werden an alle verknüpften Mandanten synchronisiert.'
+    )) {
       return;
     }
-    linkedAbsenceMigrationMutation.mutate({ resolveConflicts: true });
-  };
-
-  const handleDryRunLinkedAbsences = () => {
-    linkedAbsenceDryRunMutation.mutate();
-  };
-
-  const handleExportDryRunReport = () => {
-    if (!dryRunReport) return;
-    const tenantScopeLabel = selectedTenant === 'all' ? 'alle-mandanten' : `tenant-${selectedTenant}`;
-    const csv = buildDryRunCsv(dryRunReport, tenantScopeLabel);
-    downloadCsvFile(csv, `dry_run_absence_migration_${tenantScopeLabel}.csv`);
-    toast.success('Dry-Run-Report exportiert');
+    bulkApplyTariffMutation.mutate({ tariffId: selectedTariffId, employeeIds });
   };
 
   const displayName = (emp) => {
@@ -527,48 +377,11 @@ export default function MasterEmployeeList() {
           <Button
             variant="outline"
             size="sm"
-            onClick={handleDryRunLinkedAbsences}
-            disabled={linkedAbsenceDryRunMutation.isPending || linkedAssignmentCount === 0}
+            onClick={handleApplyTariffOpen}
+            disabled={viewMode !== 'central' || activeDisplayedCentralEmployees.length === 0}
           >
-            {linkedAbsenceDryRunMutation.isPending
-              ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              : <Eye className="w-4 h-4 mr-2" />}
-            Dry-Run ({linkedAssignmentCount})
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleMigrateLinkedAbsences}
-            disabled={linkedAbsenceMigrationMutation.isPending || linkedAssignmentCount === 0}
-          >
-            {linkedAbsenceMigrationMutation.isPending
-              ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              : <Upload className="w-4 h-4 mr-2" />}
-            Verknüpfungen migrieren ({linkedAssignmentCount})
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleMigrateAndPurgeLinkedAbsences}
-            disabled={linkedAbsenceMigrationMutation.isPending || linkedAssignmentCount === 0}
-            title="Migriert und löscht zusätzlich lokale Abwesenheitszeilen mit leerem Datum"
-          >
-            {linkedAbsenceMigrationMutation.isPending
-              ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              : <Trash2 className="w-4 h-4 mr-2" />}
-            Migrieren + leere Einträge löschen
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleMigrateAndResolveConflicts}
-            disabled={linkedAbsenceMigrationMutation.isPending || linkedAssignmentCount === 0}
-            title="Migriert und löst Konflikte am selben Tag nach Abwesenheits-Priorität auf"
-          >
-            {linkedAbsenceMigrationMutation.isPending
-              ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              : <ArrowUpDown className="w-4 h-4 mr-2" />}
-            Migrieren + Konflikte auflösen
+            <Scale className="w-4 h-4 mr-2" />
+            Tarifvertrag anwenden ({activeDisplayedCentralEmployees.length})
           </Button>
           <Button
             variant="outline"
@@ -697,7 +510,7 @@ export default function MasterEmployeeList() {
                 {searchQuery
                   ? 'Passen Sie Ihre Suche an.'
                   : viewMode === 'central'
-                    ? 'Noch keine zentralen Mitarbeiter angelegt. Erstellen Sie einen neuen Eintrag oder führen Sie die Datenmigration durch.'
+                    ? 'Noch keine zentralen Mitarbeiter angelegt. Erstellen Sie einen neuen Eintrag.'
                     : 'Alle Mandanten-Mitarbeiter sind bereits zentral verknüpft.'}
               </p>
             </div>
@@ -869,128 +682,74 @@ export default function MasterEmployeeList() {
         </CardContent>
       </Card>
 
-      <Dialog open={!!dryRunReport} onOpenChange={(open) => { if (!open) setDryRunReport(null); }}>
-        <DialogContent className="max-w-4xl">
+      {/* Tarifvertrag anwenden Dialog */}
+      <Dialog open={tariffDialogOpen} onOpenChange={(open) => { if (!open) { setTariffDialogOpen(false); setSelectedTariffId(''); } }}>
+        <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Dry-Run: Abwesenheitsmigration</DialogTitle>
+            <DialogTitle>Tarifvertrag auf alle angezeigten Mitarbeiter anwenden</DialogTitle>
             <DialogDescription>
-              Vorschau fuer bestehende Verknuepfungen ohne Schreibzugriffe. Mandantenfilter: {selectedTenant === 'all' ? 'alle Mandanten' : 'ausgewaehlter Mandant'}.
+              Wählen Sie einen Tarifvertrag. Dessen Standard-Wochenarbeitszeit und Urlaubsanspruch werden
+              bei allen aktiven Mitarbeitern in der aktuellen Ansicht gesetzt und an verknüpfte Mandanten synchronisiert.
             </DialogDescription>
           </DialogHeader>
-
-          {dryRunReport && (
-            <div className="space-y-4">
-              <div className="flex justify-end">
-                <Button size="sm" variant="outline" onClick={handleExportDryRunReport}>
-                  <Download className="w-4 h-4 mr-2" />
-                  Report exportieren
-                </Button>
-              </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
-                <ReportStat label="Verknüpfungen" value={dryRunReport.totalAssignments} />
-                <ReportStat label="Noch nicht migriert" value={dryRunReport.assignmentsNeedingAction ?? 0} tone={dryRunReport.assignmentsNeedingAction ? 'amber' : 'green'} />
-                <ReportStat label="Würden importiert" value={dryRunReport.importedAbsences} />
-                <ReportStat label="Konflikte" value={dryRunReport.conflictAssignments || 0} tone={dryRunReport.conflictAssignments ? 'amber' : undefined} />
-                <ReportStat
-                  label="Davon auflösbar"
-                  value={(() => {
-                    const rows = dryRunReport.results || [];
-                    return rows.reduce(
-                      (sum, row) => sum + Number(row.wouldResolveLocal || 0) + Number(row.wouldResolveCentral || 0),
-                      0
-                    );
-                  })()}
-                  tone="amber"
-                />
-                <ReportStat
-                  label="Offen (Pattsituation)"
-                  value={(dryRunReport.results || []).reduce((sum, row) => sum + Number(row.unresolvedConflicts || 0), 0)}
-                  tone="red"
-                />
-                <ReportStat label="Fehler" value={dryRunReport.failedAssignments} tone="red" />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <label className="flex items-center gap-2 text-sm text-slate-600">
-                  <input
-                    type="checkbox"
-                    checked={showOnlyOpen}
-                    onChange={(event) => setShowOnlyOpen(event.target.checked)}
-                  />
-                  Nur noch nicht migrierte anzeigen
-                </label>
-              </div>
-
-              <ScrollArea className="h-[360px] border rounded-md">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Mandant</TableHead>
-                      <TableHead>Mitarbeiter</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Lokal</TableHead>
-                      <TableHead>Würde bereinigt</TableHead>
-                      <TableHead>Zentral gesamt</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {dryRunReport.results?.filter((row) => !showOnlyOpen || row.needsAction || Number(row.conflicts || 0) > 0).map((row, index) => (
-                      <TableRow key={`${row.tenant_id}-${row.tenant_doctor_id}-${index}`}>
-                        <TableCell>{row.tenant_name || row.tenant_id || '–'}</TableCell>
-                        <TableCell>{row.employee_name || row.employee_id || '–'}</TableCell>
-                        <TableCell>
-                          {row.status === 'success' ? (
-                            <Badge variant="outline" className={row.needsAction ? 'text-amber-700 border-amber-300' : 'text-green-700 border-green-300'}>
-                              {row.needsAction ? 'Noch nicht migriert' : 'Fertig'}
-                            </Badge>
-                          ) : (
-                            <Badge variant={row.status === 'error' ? 'destructive' : 'outline'}>
-                              {row.status === 'skipped' ? 'Übersprungen' : 'Fehler'}
-                            </Badge>
-                          )}
-                          {row.error ? <span className="ml-2 text-xs text-red-600">{row.error}</span> : null}
-                          {row.reason ? <span className="ml-2 text-xs text-slate-500">{row.reason}</span> : null}
-                          {row.linkStatus && row.linkStatus !== 'ok' ? (
-                            <span className="ml-2 text-xs text-amber-600">{LINK_STATUS_LABELS[row.linkStatus] || row.linkStatus}</span>
-                          ) : null}
-                          {Number(row.conflicts || 0) > 0 ? (
-                            <div className="ml-2 inline-flex flex-col gap-0.5 text-xs">
-                              <span className="text-amber-700">{row.conflicts} Konflikt(e) am selben Tag</span>
-                              {Number(row.wouldResolveLocal || 0) + Number(row.wouldResolveCentral || 0) > 0 ? (
-                                <span className="text-amber-600">
-                                  {Number(row.wouldResolveLocal || 0) + Number(row.wouldResolveCentral || 0)} nach Priorität auflösbar
-                                </span>
-                              ) : null}
-                              {Number(row.resolvedConflicts || 0) > 0 ? (
-                                <span className="text-emerald-600">{row.resolvedConflicts} aufgelöst (höhere Priorität gewonnen)</span>
-                              ) : null}
-                              {Number(row.unresolvedConflicts || 0) > 0 ? (
-                                <span className="text-red-600">{row.unresolvedConflicts} offen (Pattsituation)</span>
-                              ) : null}
-                              {row.conflictSummary ? <span className="text-slate-500">{row.conflictSummary}</span> : null}
-                            </div>
-                          ) : null}
-                          {Number(row.skippedInvalidDate || 0) > 0 ? (
-                            <span className="ml-2 text-xs text-amber-600">
-                              {row.skippedInvalidDate} Eintrag/Einträge mit ungültigem Datum
-                              {row.skippedInvalidDateSummary ? ` (${row.skippedInvalidDateSummary})` : ''}
-                            </span>
-                          ) : null}
-                          {Number(row.purgedEmpty || 0) > 0 ? (
-                            <span className="ml-2 text-xs text-slate-500">{row.purgedEmpty} leere(r) Eintrag/Einträge gelöscht</span>
-                          ) : null}
-                        </TableCell>
-                        <TableCell>{row.localAbsences ?? 0}</TableCell>
-                        <TableCell>{row.removedLocal ?? 0}</TableCell>
-                        <TableCell>{row.centralTotal ?? 0}</TableCell>
-                      </TableRow>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">Tarifvertrag</label>
+              <Select value={selectedTariffId} onValueChange={setSelectedTariffId}>
+                <SelectTrigger>
+                  <Scale className="w-4 h-4 mr-2 text-slate-400" />
+                  <SelectValue placeholder="Tarifvertrag auswählen…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {tariffs
+                    .filter(t => t.default_weekly_hours != null || t.default_vacation_days != null)
+                    .map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.name} ({t.short_name})
+                        {t.default_weekly_hours ? ` – ${t.default_weekly_hours}h` : ''}
+                        {t.default_vacation_days ? ` / ${t.default_vacation_days}T` : ''}
+                      </SelectItem>
                     ))}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
+                </SelectContent>
+              </Select>
+              {tariffs.filter(t => t.default_weekly_hours != null || t.default_vacation_days != null).length === 0 && (
+                <p className="text-xs text-amber-600 mt-1">
+                  Keine Tarifverträge mit Standardwerten vorhanden. Bitte erst in Tarifverträge anlegen.
+                </p>
+              )}
             </div>
-          )}
+            {selectedTariffId && (() => {
+              const t = tariffs.find(tar => tar.id === selectedTariffId);
+              if (!t) return null;
+              return (
+                <div className="rounded-lg border bg-slate-50 p-3 space-y-1 text-sm">
+                  <div className="font-medium">{t.name}</div>
+                  <div className="text-slate-600">
+                    {t.default_weekly_hours != null && <p>Wochenarbeitszeit: <strong>{t.default_weekly_hours}h</strong></p>}
+                    {t.default_vacation_days != null && <p>Urlaubsanspruch: <strong>{t.default_vacation_days} Tage</strong></p>}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-2">
+                    Betrifft: <strong>{activeDisplayedCentralEmployees.length} aktive Mitarbeiter</strong>
+                    {selectedTenant !== 'all' ? ` (gefiltert nach Mandant)` : ''}
+                  </p>
+                </div>
+              );
+            })()}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => { setTariffDialogOpen(false); setSelectedTariffId(''); }}>
+              Abbrechen
+            </Button>
+            <Button
+              onClick={handleBulkApplyTariff}
+              disabled={!selectedTariffId || bulkApplyTariffMutation.isPending}
+            >
+              {bulkApplyTariffMutation.isPending
+                ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                : <Scale className="w-4 h-4 mr-2" />}
+              Anwenden
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
@@ -1014,22 +773,6 @@ function StatCard({ icon: Icon, label, value, color = 'slate' }) {
         <span className="text-xs text-slate-500">{label}</span>
       </div>
       <p className="text-2xl font-bold">{value}</p>
-    </div>
-  );
-}
-
-function ReportStat({ label, value, tone = 'slate' }) {
-  const toneMap = {
-    slate: 'bg-slate-50 text-slate-700 border-slate-200',
-    red: 'bg-red-50 text-red-700 border-red-200',
-    amber: 'bg-amber-50 text-amber-700 border-amber-200',
-    green: 'bg-green-50 text-green-700 border-green-200',
-  };
-
-  return (
-    <div className={`rounded-lg border p-3 ${toneMap[tone] || toneMap.slate}`}>
-      <div className="text-xs opacity-70">{label}</div>
-      <div className="text-xl font-semibold">{value}</div>
     </div>
   );
 }
