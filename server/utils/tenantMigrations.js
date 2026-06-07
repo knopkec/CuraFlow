@@ -266,6 +266,12 @@ export async function runTenantMigrations(dbPool, cacheKey = 'default') {
   await addCol('add_doctor_target_weekly_hours',
     `ALTER TABLE Doctor ADD COLUMN target_weekly_hours DECIMAL(4,1) DEFAULT NULL`);
 
+  // ── Doctor: Arbeitszeitmodell für Teilzeit ──
+  //   reduced_daily  → täglich reduzierte Arbeitszeit (Standard, FTE < 1.0)
+  //   full_days_off  → volle Arbeitstage + ganze freie Tage
+  await addCol('add_doctor_part_time_model',
+    `ALTER TABLE Doctor ADD COLUMN part_time_model ENUM('reduced_daily','full_days_off') DEFAULT 'reduced_daily'`);
+
   // ── ShiftTimeRule: Kürzel (short_code) für Dienstmodelle ──
   await addCol('add_shift_time_rule_short_code',
     `ALTER TABLE ShiftTimeRule ADD COLUMN short_code VARCHAR(20) DEFAULT NULL`);
@@ -303,7 +309,8 @@ export async function runTenantMigrations(dbPool, cacheKey = 'default') {
   try {
     clearColumnsCache([
       'Workplace', 'WorkplaceTimeslot', 'ShiftEntry', 'TimeslotTemplate',
-      'TeamRole', 'WorkplaceQualification', 'Qualification', 'DoctorQualification', 'Doctor', 'ShiftTimeRule'
+      'TeamRole', 'WorkplaceQualification', 'Qualification', 'DoctorQualification', 'Doctor', 'ShiftTimeRule',
+      'StaffingPlanEntry', 'Wish', 'Absence', 'Shift'
     ], cacheKey);
   } catch (error) {
     results.push({ migration: 'clear_columns_cache', status: 'error', error: error.message });

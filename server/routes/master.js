@@ -149,12 +149,58 @@ function createMonthlyPeriods(startDate, endDate = new Date(), maxMonths = 24) {
   return periods.slice(-maxMonths);
 }
 
-function calculateMonthlyTargetMinutes(targetHoursPerWeek, year, month) {
+function calculateMonthlyTargetMinutes(targetHoursPerWeek, year, month, options = {}) {
   const weeklyHours = Number(targetHoursPerWeek);
   if (!Number.isFinite(weeklyHours) || weeklyHours <= 0) return 0;
 
   const daysInMonth = getDaysInMonth(new Date(year, month - 1, 1));
+
+  // Im Modell "volle Tage mit freien Tagen" wird an Arbeitstagen die volle
+  // Tagesstundenzahl angesetzt; die Reduktion erfolgt über freie Tage.
+  // Soll = Arbeitsstage × (Wochenstunden / 5)
+  if (options.partTimeModel === 'full_days_off') {
+    const fte = Number(options.fte);
+    if (Number.isFinite(fte) && fte > 0 && fte < 1) {
+      const workDaysPerWeek = Math.max(1, Math.min(5, Math.round(fte * 5)));
+      const fullDailyHours = weeklyHours / 5;
+      const workdays = countWorkdaysInMonth(year, month);
+      return Math.round((workdays * (workDaysPerWeek / 5)) * fullDailyHours * 60);
+    }
+  }
+
   return Math.round((daysInMonth * weeklyHours / 7) * 60);
+}
+
+function countWorkdaysInMonth(year, month) {
+  const daysInMonth = getDaysInMonth(new Date(year, month - 1, 1));
+  let count = 0;
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dow = new Date(year, month - 1, day).getDay();
+    if (dow !== 0 && dow !== 6) count++;
+  }
+  return count;
+}
+
+/**
+ * Aggregiert die Teilzeit-Kontexte aller verknüpften Tenant-Doctors.
+ * - partTimeModel: 'full_days_off' sobald irgendeine Zuordnung dies meldet,
+ *   sonst 'reduced_daily' (Default).
+ * - fte: der kleinste FTE-Wert (konservativ), damit das Soll nicht zu hoch ausfällt.
+ */
+function aggregatePartTimeContext(assignmentContext) {
+  if (!assignmentContext || assignmentContext.size === 0) return {};
+  let partTimeModel = 'reduced_daily';
+  let minFte = null;
+  for (const ctx of assignmentContext.values()) {
+    if (ctx?.partTimeModel === 'full_days_off') partTimeModel = 'full_days_off';
+    if (ctx?.fte !== null && ctx?.fte !== undefined) {
+      const numericFte = Number(ctx.fte);
+      if (Number.isFinite(numericFte) && numericFte > 0) {
+        minFte = minFte === null ? numericFte : Math.min(minFte, numericFte);
+      }
+    }
+  }
+  return { partTimeModel, fte: minFte };
 }
 
 async function syncEmployeeWorkSettingsForAssignments(adminUserId, employee, assignments, actor = null) {
@@ -203,6 +249,7 @@ async function syncTimeAccountsForEmployee(adminUserId, employee, assignments) {
   const tokenMap = new Map(tokens.map(token => [token.id, token]));
   const rangeStart = periods[0].startDate;
   const rangeEnd = periods[periods.length - 1].endDate;
+  const assignmentContext = new Map(); // tenantId -> { partTimeModel, fte }
 
   await Promise.all(linkedAssignments.map(async (assignment) => {
     const token = tokenMap.get(assignment.tenant_id);
@@ -227,6 +274,32 @@ async function syncTimeAccountsForEmployee(adminUserId, employee, assignments) {
            WHERE doctor_id = ? AND date >= ? AND date <= ?`,
           [assignment.tenant_doctor_id, rangeStart, rangeEnd]
         );
+
+        // Teilzeitmodell + FTE des verknüpften Doctors laden, um das Soll
+        // für das Modell "volle Tage mit freien Tagen" korrekt zu berechnen.
+        let partTimeModel = null;
+        let doctorFte = null;
+        try {
+          const [doctorCols] = await pool.execute(
+            `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+             WHERE TABLE_NAME = 'Doctor' AND TABLE_SCHEMA = DATABASE()`
+          );
+          const doctorColNames = new Set(doctorCols.map(col => col.COLUMN_NAME));
+          const selectParts = [];
+          if (doctorColNames.has('part_time_model')) selectParts.push('part_time_model');
+          if (doctorColNames.has('fte')) selectParts.push('fte');
+          if (selectParts.length > 0) {
+            const [docRows] = await pool.execute(
+              `SELECT ${selectParts.join(', ')} FROM Doctor WHERE id = ? LIMIT 1`,
+              [assignment.tenant_doctor_id]
+            );
+            if (docRows.length > 0) {
+              partTimeModel = docRows[0].part_time_model || null;
+              doctorFte = docRows[0].fte ?? null;
+            }
+          }
+        } catch { /* Tabelle/Spalte fehlt → Standardberechnung */ }
+        assignmentContext.set(assignment.tenant_id, { partTimeModel, fte: doctorFte });
 
         let timeslots = [];
         try {
@@ -326,7 +399,8 @@ async function syncTimeAccountsForEmployee(adminUserId, employee, assignments) {
     const targetMinutes = calculateMonthlyTargetMinutes(
       resolveEmployeeTargetWeeklyHours(employee) ?? 38.5,
       period.year,
-      period.month
+      period.month,
+      aggregatePartTimeContext(assignmentContext)
     );
     const actualMinutes = Math.round(actualMinutesByMonth.get(period.key) || 0);
     const balanceMinutes = actualMinutes - targetMinutes;

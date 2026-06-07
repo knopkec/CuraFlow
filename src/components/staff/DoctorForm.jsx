@@ -121,6 +121,7 @@ export default function DoctorForm({ open, onOpenChange, doctor, onSubmit }) {
         fte: doctor.fte !== undefined ? Math.round(parseFloat(doctor.fte) * 100) / 100 : 1.0,
         target_weekly_hours: doctor.target_weekly_hours || '',
         central_employee_id: doctor.central_employee_id || '',
+        part_time_model: doctor.part_time_model || 'reduced_daily',
       });
       // Für Bearbeitung keine separaten selectedQualIds – wird über den Editor selbst gesteuert
       setSelectedQualIds([]);
@@ -136,6 +137,7 @@ export default function DoctorForm({ open, onOpenChange, doctor, onSubmit }) {
         contract_end_date: "",
         exclude_from_staffing_plan: false,
         central_employee_id: '',
+        part_time_model: 'reduced_daily',
       });
       setSelectedQualIds([]);
     }
@@ -311,6 +313,47 @@ export default function DoctorForm({ open, onOpenChange, doctor, onSubmit }) {
                 )}
             </div>
           </div>
+
+          {parseFloat(formData.fte) < 1.0 && (
+            <div className="grid gap-2 border rounded-lg p-3 bg-slate-50">
+              <Label className="text-base">Arbeitszeitmodell (Teilzeit)</Label>
+              <p className="text-xs text-slate-500 -mt-1">
+                Wie sollen die reduzierten Stunden verteilt werden?
+              </p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <label className="flex items-start gap-2 border rounded p-2 cursor-pointer hover:bg-white flex-1"
+                  data-testid="staff-form-pt-model-reduced">
+                  <input
+                    type="radio"
+                    name="part_time_model"
+                    value="reduced_daily"
+                    checked={(formData.part_time_model || 'reduced_daily') === 'reduced_daily'}
+                    onChange={(e) => setFormData({ ...formData, part_time_model: e.target.value })}
+                    className="mt-0.5"
+                  />
+                  <div className="text-sm">
+                    <div className="font-medium">Täglich reduziert</div>
+                    <div className="text-xs text-slate-500">Jeden Tag kürzer arbeiten (z.B. 0,8 → 6,4 h/Tag)</div>
+                  </div>
+                </label>
+                <label className="flex items-start gap-2 border rounded p-2 cursor-pointer hover:bg-white flex-1"
+                  data-testid="staff-form-pt-model-full-days">
+                  <input
+                    type="radio"
+                    name="part_time_model"
+                    value="full_days_off"
+                    checked={formData.part_time_model === 'full_days_off'}
+                    onChange={(e) => setFormData({ ...formData, part_time_model: e.target.value })}
+                    className="mt-0.5"
+                  />
+                  <div className="text-sm">
+                    <div className="font-medium">Volle Tage mit freien Tagen</div>
+                    <div className="text-xs text-slate-500">An Arbeitstagen volle Schicht, ganze Tage frei (z.B. 0,8 → 4 Tage 1,0 + 1 Tag frei)</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2">
                 <Label htmlFor="contract_end_date">Befristet bis (Optional)</Label>

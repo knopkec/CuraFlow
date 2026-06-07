@@ -97,6 +97,7 @@ export class CostFunction {
         limitWeekend,
         isPublicHoliday,
         autoFreiByDate,
+        isPartTimeOffDay,
         systemSettings,
     }) {
         this.doctors = doctors;
@@ -127,6 +128,7 @@ export class CostFunction {
         this.limitWeekend = limitWeekend;
         this.isPublicHoliday = isPublicHoliday;
         this.autoFreiByDate = autoFreiByDate || {};
+        this.isPartTimeOffDay = isPartTimeOffDay || (() => false);
         this.systemSettings = systemSettings;
 
         // Pre-compute lookup maps
@@ -167,6 +169,11 @@ export class CostFunction {
      */
     assignmentCost(doctorId, workplace, dateStr, context = {}) {
         let totalCost = 0;
+
+        // 0. Part-time off-day (full_days_off model) → hard block
+        if (this.isPartTimeOffDay(doctorId, dateStr)) {
+            return Infinity;
+        }
 
         // 1. Qualification cost
         const qCost = this._qualificationCost(doctorId, workplace);

@@ -36,6 +36,7 @@
 import { CostFunction } from './costFunction';
 import { getAutoFreiDate } from '@/utils/autoFrei';
 import { getWorkplaceCategoriesFromSettings, workplaceAllowsMultiple } from '@/utils/workplaceCategoryUtils';
+import { isFullDaysOffModel, getPartTimeWorkDaysPerWeek } from './doctorWorkTime';
 
 export function generateSuggestions({
     weekDays,
@@ -395,6 +396,83 @@ export function generateSuggestions({
     const autoFreiByDate = {};
     const autoFreiSuggestions = [];
 
+    // ---- Part-time off-day tracking (full_days_off model) ----
+    // Für Mitarbeiter im Modell "volle Tage mit freien Tagen" werden
+    // (5 - round(FTE*5)) Wochentage als freie Tage blockiert. Die Verteilung
+    // erfolgt flexibel: pro Kalenderwoche werden die Tage mit den wenigsten
+    // bereits geblockten Slots (Absenzen, Auto-Frei, explizite Wünsche) gewählt,
+    // um Konflikte mit bestehenden Einträgen zu minimieren.
+    const partTimeOffDays = new Set(); // Set<`${weekKey}::${doctorId}::${dateStr}`>
+
+    const ptIsoWeekKey = (date) => {
+        const d = new Date(date);
+        d.setHours(0, 0, 0, 0);
+        d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+        const yearStart = new Date(d.getFullYear(), 0, 1);
+        const weekNum = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+        return `${d.getFullYear()}-W${String(weekNum).padStart(2, '0')}`;
+    };
+
+    const ptFormatDate = (date) => {
+        const d = new Date(date);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    };
+
+    const buildPartTimeOffDays = () => {
+        // Gruppierung pro ISO-Woche
+        const weekDaysMap = new Map();
+        for (const day of weekDays) {
+            const key = ptIsoWeekKey(day);
+            if (!weekDaysMap.has(key)) weekDaysMap.set(key, []);
+            weekDaysMap.get(key).push(day);
+        }
+
+        for (const doctor of doctors) {
+            if (!isFullDaysOffModel(doctor)) continue;
+            const offDaysCount = 5 - getPartTimeWorkDaysPerWeek(doctor);
+            if (offDaysCount <= 0) continue;
+
+            for (const [weekKey, days] of weekDaysMap.entries()) {
+                if (days.length <= offDaysCount) continue; // weniger Tage als nötig → überspringen
+
+                // Konflikt-Score pro Tag: bestehende Absenzen, Auto-Frei. Wir wählen
+                // die Tage mit dem niedrigsten Score, damit fixe Abwesenheiten
+                // Vorrang haben und Sonntage/Feiertage bevorzugt werden.
+                const dayScores = days.map((day) => {
+                    const dateStr = ptFormatDate(day);
+                    let score = 0;
+                    for (const s of existingShifts) {
+                        if (s.date === dateStr && s.doctor_id === doctor.id
+                            && absencePositions.includes(s.position)) {
+                            score += 100; // bereits abwesend → kein Off-Day nötig
+                        }
+                    }
+                    if (autoFreiByDate[dateStr]?.has(doctor.id)) score += 50;
+                    if (day.getDay() === 0) score -= 5;
+                    if (day.getDay() === 6) score -= 2;
+                    if (isPublicHoliday(day)) score -= 5;
+                    return { day, dateStr, score };
+                });
+
+                dayScores.sort((a, b) => a.score - b.score);
+                const chosen = dayScores.slice(0, offDaysCount);
+                for (const { dateStr } of chosen) {
+                    partTimeOffDays.add(`${weekKey}::${doctor.id}::${dateStr}`);
+                }
+            }
+        }
+    };
+    buildPartTimeOffDays();
+
+    const isPartTimeOffDay = (doctorId, dateStr) => {
+        const day = new Date(dateStr + 'T00:00:00');
+        const key = `${ptIsoWeekKey(day)}::${doctorId}::${dateStr}`;
+        return partTimeOffDays.has(key);
+    };
+
     // ========================================================
     //  Cost Function instance (shared across all phases)
     // ========================================================
@@ -422,6 +500,7 @@ export function generateSuggestions({
         limitWeekend,
         isPublicHoliday,
         autoFreiByDate,
+        isPartTimeOffDay,
         systemSettings,
     });
 
@@ -569,6 +648,13 @@ export function generateSuggestions({
             }
         }
 
+        // Part-time off-day (full_days_off model) → block this doctor
+        for (const d of doctors) {
+            if (isPartTimeOffDay(d.id, dateStr)) {
+                baseBlocked.add(d.id);
+            }
+        }
+
         for (const s of existingShifts) {
             if (s.date !== dateStr) continue;
             posCount[s.position] = (posCount[s.position] || 0) + 1;
@@ -697,6 +783,9 @@ export function generateSuggestions({
                         // Demos/Konsile only block if they are marked as availability-relevant
                         if (xwp?.category === 'Demonstrationen & Konsile' && xwp?.affects_availability !== true) continue;
                         nextDayBlocked.add(s.doctor_id);
+                    }
+                    for (const d of doctors) {
+                        if (isPartTimeOffDay(d.id, nextDateStr)) nextDayBlocked.add(d.id);
                     }
 
                     computeImpactForDay(nextDay, nextDayBlocked, 1);
