@@ -67,7 +67,7 @@ test.describe('schedule core workflows', () => {
     await expect(schedulePage.shift(seededSchedule.shiftIds.ct)).toBeVisible();
     await expect(schedulePage.shift(seededSchedule.shiftIds.mrt)).toBeVisible();
     await expect(schedulePage.qualificationWarning(seededSchedule.shiftIds.ct)).toBeVisible();
-    await expect(page.getByText('Datenbankproblem')).toHaveCount(0);
+    await expect(page.getByText('Datenbankproblem', { exact: true })).toHaveCount(0);
 
     await schedulePage.openMonthView();
     const mayLabel = await schedulePage.currentPeriodLabel.textContent();

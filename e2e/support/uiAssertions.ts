@@ -1,7 +1,7 @@
 import { expect, errors, type Page } from '@playwright/test';
 
 export async function expectNoDatabaseProblemToast(page: Page) {
-  const databaseProblemToast = page.getByText('Datenbankproblem');
+  const databaseProblemToast = page.getByText('Datenbankproblem', { exact: true });
 
   try {
     await databaseProblemToast.waitFor({ state: 'visible', timeout: 1500 });

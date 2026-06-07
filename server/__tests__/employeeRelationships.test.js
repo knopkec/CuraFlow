@@ -22,7 +22,7 @@ const mockDb = { execute: vi.fn() };
 
 vi.mock('../index.js', () => ({ db: mockDb }));
 
-vi.mock('./auth.js', () => ({
+vi.mock('../routes/auth.js', () => ({
   authMiddleware: (req, res, next) => next(),
   adminMiddleware: (req, res, next) => next(),
 }));
@@ -44,7 +44,7 @@ vi.mock('../utils/centralAbsences.js', () => ({
   seedTenantDoctorAbsencesFromCentral: vi.fn(),
 }));
 vi.mock('../utils/realtime.js', () => ({ broadcastPlanUpdate: vi.fn(), buildRealtimeScope: vi.fn() }));
-vi.mock('./holidays.js', () => ({ getPublicHolidayDatesForYear: vi.fn(() => []), clearHolidayCache: vi.fn() }));
+vi.mock('../routes/holidays.js', () => ({ getPublicHolidayDatesForYear: vi.fn(() => []), clearHolidayCache: vi.fn() }));
 vi.mock('date-fns', () => ({
   format: vi.fn(() => '2026-01'),
   startOfMonth: vi.fn(() => new Date('2026-01-01')),
