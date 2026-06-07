@@ -904,7 +904,7 @@ function RelationshipsTab({ employeeId }) {
   });
 
   const { data: allEmployees = [] } = useQuery({
-    queryKey: ['master-central-employees'],
+    queryKey: ['master-central-employees-for-relationship', employeeId],
     queryFn: async () => {
       const res = await api.request('/api/master/employees');
       return (res.employees || []).filter(e => e.is_active && e.id !== employeeId);
