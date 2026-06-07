@@ -229,6 +229,28 @@ export async function runMasterMigrations(dbPool) {
     `);
   }, { duplicateCodes: ['ER_TABLE_EXISTS_ERROR'], duplicateReason: 'Tabelle bereits vorhanden' });
 
+  // ===== Employee Relationships =====
+
+  await run('create_employee_relationship_table', async () => {
+    await dbPool.execute(`
+      CREATE TABLE IF NOT EXISTS EmployeeRelationship (
+        id VARCHAR(36) PRIMARY KEY,
+        employee_id VARCHAR(36) NOT NULL,
+        related_employee_id VARCHAR(36) NOT NULL,
+        relationship_type VARCHAR(100) NOT NULL DEFAULT 'lebensgemeinschaft',
+        shift_conflict BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        created_by VARCHAR(255) DEFAULT NULL,
+        UNIQUE KEY uk_relationship_pair (employee_id, related_employee_id),
+        INDEX idx_relationship_employee (employee_id),
+        INDEX idx_relationship_related (related_employee_id),
+        CONSTRAINT fk_relationship_employee FOREIGN KEY (employee_id) REFERENCES Employee(id) ON DELETE CASCADE,
+        CONSTRAINT fk_relationship_related FOREIGN KEY (related_employee_id) REFERENCES Employee(id) ON DELETE CASCADE
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+    `);
+  }, { duplicateCodes: ['ER_TABLE_EXISTS_ERROR'], duplicateReason: 'Tabelle bereits vorhanden' });
+
   // ===== PHASE 1: Work Time Models =====
 
   await run('create_work_time_model_table', async () => {
@@ -268,15 +290,6 @@ export async function runMasterMigrations(dbPool) {
     const changed = await addColumnIfMissing('Employee', 'work_time_model_id', 'VARCHAR(36) DEFAULT NULL');
     return changed || SKIPPED;
   }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalte bereits vorhanden', skippedReason: 'Spalte bereits vorhanden' });
-
-  // contract_type was originally ENUM with old value set. Change to VARCHAR
-  // so the UI values ('unbefristet','befristet','praktikum', etc.) are accepted.
-  await run('change_contract_type_to_varchar', async () => {
-    const col = await getColumnInfo('Employee', 'contract_type');
-    if (!col) return SKIPPED;
-    if (col.COLUMN_TYPE && col.COLUMN_TYPE.startsWith('varchar')) return SKIPPED; // already done
-    await dbPool.execute(`ALTER TABLE Employee MODIFY COLUMN contract_type VARCHAR(50) DEFAULT NULL`);
-  }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalte bereits vorhanden', skippedReason: 'Bereits VARCHAR' });
 
   // ===== PHASE 4: Time Accounts (Master-DB) =====
 
@@ -629,139 +642,6 @@ export async function runMasterMigrations(dbPool) {
 
   await run('add_shared_workplace_timeslots_enabled', async () => {
     const changed = await addColumnIfMissing('shared_workplace', 'timeslots_enabled', 'TINYINT(1) DEFAULT 0');
-    return changed || SKIPPED;
-  }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalte bereits vorhanden', skippedReason: 'Spalte bereits vorhanden' });
-
-  // ===== PHASE: Pay Scale Tariffs (Tarifverträge) =====
-
-  await run('create_pay_scale_tariff_table', async () => {
-    await dbPool.execute(`
-      CREATE TABLE IF NOT EXISTS PayScaleTariff (
-        id VARCHAR(36) PRIMARY KEY,
-        name VARCHAR(100) NOT NULL,
-        short_name VARCHAR(20) NOT NULL,
-        default_weekly_hours DECIMAL(4,1) DEFAULT NULL,
-        default_vacation_days INT DEFAULT NULL,
-        description VARCHAR(255) DEFAULT NULL,
-        is_active BOOLEAN DEFAULT TRUE,
-        sort_order INT DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
-    `);
-  }, { duplicateCodes: ['ER_TABLE_EXISTS_ERROR'], duplicateReason: 'Tabelle bereits vorhanden' });
-
-  await run('create_pay_scale_group_table', async () => {
-    await dbPool.execute(`
-      CREATE TABLE IF NOT EXISTS PayScaleGroup (
-        id VARCHAR(36) PRIMARY KEY,
-        tariff_id VARCHAR(36) NOT NULL,
-        name VARCHAR(50) NOT NULL,
-        description VARCHAR(255) DEFAULT NULL,
-        sort_order INT DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_group_tariff (tariff_id)
-      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
-    `);
-  }, { duplicateCodes: ['ER_TABLE_EXISTS_ERROR'], duplicateReason: 'Tabelle bereits vorhanden' });
-
-  // Seed pay scale tariffs (idempotent via INSERT IGNORE)
-  await run('seed_pay_scale_tariffs', async () => {
-    // Use INSERT IGNORE with deterministic UUIDs derived from fixed seed strings
-    // so re-runs don't create duplicates.
-    const tariffs = [
-      { id: 'pst-tv-aerzte',   name: 'TV-Ärzte',     short_name: 'TV-Ärzte',  hpw: 40.0, vacation: 30, sort: 1 },
-      { id: 'pst-tvoed-k',     name: 'TVöD-K',        short_name: 'TVöD-K',    hpw: 38.5, vacation: 30, sort: 2 },
-      { id: 'pst-tvoed-p',     name: 'TVöD-P (Pflege)', short_name: 'TVöD-P', hpw: 38.5, vacation: 30, sort: 3 },
-      { id: 'pst-tvoed-vka',   name: 'TVöD-VKA',      short_name: 'TVöD-VKA', hpw: 39.0, vacation: 30, sort: 4 },
-      { id: 'pst-haustarif',   name: 'Haustarifvertrag', short_name: 'Haustarif', hpw: 38.5, vacation: 30, sort: 5 },
-      { id: 'pst-at',          name: 'Außertariflich', short_name: 'AT',        hpw: null, vacation: null, sort: 6 },
-    ];
-    for (const t of tariffs) {
-      await dbPool.execute(
-        `INSERT IGNORE INTO PayScaleTariff (id, name, short_name, default_weekly_hours, default_vacation_days, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [t.id, t.name, t.short_name, t.hpw, t.vacation, t.sort]
-      );
-    }
-  }, { duplicateCodes: ['ER_TABLE_EXISTS_ERROR'], duplicateReason: 'Bereits vorhanden' });
-
-  // Seed pay scale groups (idempotent)
-  await run('seed_pay_scale_groups', async () => {
-    const groups = [
-      // TV-Ärzte: Ä1–Ä4
-      { id: 'psg-aerzte-a1', tariff: 'pst-tv-aerzte', name: 'Ä1', sort: 1 },
-      { id: 'psg-aerzte-a2', tariff: 'pst-tv-aerzte', name: 'Ä2', sort: 2 },
-      { id: 'psg-aerzte-a3', tariff: 'pst-tv-aerzte', name: 'Ä3', sort: 3 },
-      { id: 'psg-aerzte-a4', tariff: 'pst-tv-aerzte', name: 'Ä4', sort: 4 },
-      // TVöD-K: E1–E15
-      { id: 'psg-k-e1',  tariff: 'pst-tvoed-k', name: 'E1',  sort: 1 },
-      { id: 'psg-k-e2',  tariff: 'pst-tvoed-k', name: 'E2',  sort: 2 },
-      { id: 'psg-k-e3',  tariff: 'pst-tvoed-k', name: 'E3',  sort: 3 },
-      { id: 'psg-k-e4',  tariff: 'pst-tvoed-k', name: 'E4',  sort: 4 },
-      { id: 'psg-k-e5',  tariff: 'pst-tvoed-k', name: 'E5',  sort: 5 },
-      { id: 'psg-k-e6',  tariff: 'pst-tvoed-k', name: 'E6',  sort: 6 },
-      { id: 'psg-k-e7',  tariff: 'pst-tvoed-k', name: 'E7',  sort: 7 },
-      { id: 'psg-k-e8',  tariff: 'pst-tvoed-k', name: 'E8',  sort: 8 },
-      { id: 'psg-k-e9',  tariff: 'pst-tvoed-k', name: 'E9',  sort: 9 },
-      { id: 'psg-k-e10', tariff: 'pst-tvoed-k', name: 'E10', sort: 10 },
-      { id: 'psg-k-e11', tariff: 'pst-tvoed-k', name: 'E11', sort: 11 },
-      { id: 'psg-k-e12', tariff: 'pst-tvoed-k', name: 'E12', sort: 12 },
-      { id: 'psg-k-e13', tariff: 'pst-tvoed-k', name: 'E13', sort: 13 },
-      { id: 'psg-k-e14', tariff: 'pst-tvoed-k', name: 'E14', sort: 14 },
-      { id: 'psg-k-e15', tariff: 'pst-tvoed-k', name: 'E15', sort: 15 },
-      // TVöD-P: P5–P16
-      { id: 'psg-p-p5',  tariff: 'pst-tvoed-p', name: 'P5',  sort: 1 },
-      { id: 'psg-p-p6',  tariff: 'pst-tvoed-p', name: 'P6',  sort: 2 },
-      { id: 'psg-p-p7',  tariff: 'pst-tvoed-p', name: 'P7',  sort: 3 },
-      { id: 'psg-p-p8',  tariff: 'pst-tvoed-p', name: 'P8',  sort: 4 },
-      { id: 'psg-p-p9',  tariff: 'pst-tvoed-p', name: 'P9',  sort: 5 },
-      { id: 'psg-p-p10', tariff: 'pst-tvoed-p', name: 'P10', sort: 6 },
-      { id: 'psg-p-p11', tariff: 'pst-tvoed-p', name: 'P11', sort: 7 },
-      { id: 'psg-p-p12', tariff: 'pst-tvoed-p', name: 'P12', sort: 8 },
-      { id: 'psg-p-p13', tariff: 'pst-tvoed-p', name: 'P13', sort: 9 },
-      { id: 'psg-p-p14', tariff: 'pst-tvoed-p', name: 'P14', sort: 10 },
-      { id: 'psg-p-p15', tariff: 'pst-tvoed-p', name: 'P15', sort: 11 },
-      { id: 'psg-p-p16', tariff: 'pst-tvoed-p', name: 'P16', sort: 12 },
-      // TVöD-VKA: E1–E15
-      { id: 'psg-vka-e1',  tariff: 'pst-tvoed-vka', name: 'E1',  sort: 1 },
-      { id: 'psg-vka-e2',  tariff: 'pst-tvoed-vka', name: 'E2',  sort: 2 },
-      { id: 'psg-vka-e3',  tariff: 'pst-tvoed-vka', name: 'E3',  sort: 3 },
-      { id: 'psg-vka-e4',  tariff: 'pst-tvoed-vka', name: 'E4',  sort: 4 },
-      { id: 'psg-vka-e5',  tariff: 'pst-tvoed-vka', name: 'E5',  sort: 5 },
-      { id: 'psg-vka-e6',  tariff: 'pst-tvoed-vka', name: 'E6',  sort: 6 },
-      { id: 'psg-vka-e7',  tariff: 'pst-tvoed-vka', name: 'E7',  sort: 7 },
-      { id: 'psg-vka-e8',  tariff: 'pst-tvoed-vka', name: 'E8',  sort: 8 },
-      { id: 'psg-vka-e9',  tariff: 'pst-tvoed-vka', name: 'E9',  sort: 9 },
-      { id: 'psg-vka-e10', tariff: 'pst-tvoed-vka', name: 'E10', sort: 10 },
-      { id: 'psg-vka-e11', tariff: 'pst-tvoed-vka', name: 'E11', sort: 11 },
-      { id: 'psg-vka-e12', tariff: 'pst-tvoed-vka', name: 'E12', sort: 12 },
-      { id: 'psg-vka-e13', tariff: 'pst-tvoed-vka', name: 'E13', sort: 13 },
-      { id: 'psg-vka-e14', tariff: 'pst-tvoed-vka', name: 'E14', sort: 14 },
-      { id: 'psg-vka-e15', tariff: 'pst-tvoed-vka', name: 'E15', sort: 15 },
-    ];
-    for (const g of groups) {
-      await dbPool.execute(
-        `INSERT IGNORE INTO PayScaleGroup (id, tariff_id, name, sort_order) VALUES (?, ?, ?, ?)`,
-        [g.id, g.tariff, g.name, g.sort]
-      );
-    }
-  }, { duplicateCodes: ['ER_TABLE_EXISTS_ERROR'], duplicateReason: 'Bereits vorhanden' });
-
-  // Add pay scale columns to Employee
-  await run('add_employee_payscale_tariff_id', async () => {
-    const changed = await addColumnIfMissing('Employee', 'payscale_tariff_id', 'VARCHAR(36) DEFAULT NULL');
-    return changed || SKIPPED;
-  }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalte bereits vorhanden', skippedReason: 'Spalte bereits vorhanden' });
-
-  await run('add_employee_payscale_group_id', async () => {
-    const changed = await addColumnIfMissing('Employee', 'payscale_group_id', 'VARCHAR(36) DEFAULT NULL');
-    return changed || SKIPPED;
-  }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalte bereits vorhanden', skippedReason: 'Spalte bereits vorhanden' });
-
-  await run('add_employee_payscale_level', async () => {
-    const changed = await addColumnIfMissing('Employee', 'payscale_level', 'INT DEFAULT NULL');
     return changed || SKIPPED;
   }, { duplicateCodes: ['ER_DUP_FIELDNAME'], duplicateReason: 'Spalte bereits vorhanden', skippedReason: 'Spalte bereits vorhanden' });
 
